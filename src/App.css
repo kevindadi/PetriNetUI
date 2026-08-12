@@ -1,0 +1,222 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  color: #1f2937;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f3f4f6;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.toolbar .spacer {
+  flex: 1;
+}
+
+.toolbar button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.toolbar button:hover {
+  background: #e5e7eb;
+}
+
+.toolbar button.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.toolbar .arc-types {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.toolbar .arc-types button {
+  padding: 6px 10px;
+  font-size: 0.85em;
+}
+
+.arc-mode-hint {
+  font-size: 0.85em;
+  color: #2563eb;
+  font-weight: 500;
+}
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.canvas {
+  flex: 1;
+  min-width: 0;
+}
+
+.inspector {
+  width: 240px;
+  border-left: 1px solid #e5e7eb;
+  background: #fafafa;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.inspector h2 {
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  margin: 0 0 12px;
+}
+
+.inspector .hint {
+  font-size: 0.85em;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.props {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.props label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85em;
+  color: #374151;
+}
+
+.props input {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.95em;
+}
+
+.props select {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.95em;
+  background: #fff;
+}
+
+/* ---- Petri nodes ---- */
+
+.petri-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.petri-node .node-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  font-size: 0.8em;
+  white-space: nowrap;
+  color: #374151;
+  pointer-events: none;
+}
+
+.place-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid #1f2937;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.place-node.selected .place-circle,
+.transition-node.selected .transition-box {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.4);
+}
+
+.react-flow__node.pending-source .place-circle,
+.react-flow__node.pending-source .transition-box {
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.55);
+}
+
+.place-tokens {
+  font-size: 0.95em;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.transition-box {
+  width: 44px;
+  height: 44px;
+  border: 2px solid #1f2937;
+  background: #ffffff;
+}
+
+.petri-handle {
+  width: 10px;
+  height: 10px;
+  border: none;
+  background: transparent;
+}
+
+/* ---- Arc label ---- */
+
+.arc-label {
+  position: absolute;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.75em;
+  pointer-events: none;
+  color: #1f2937;
+}
+
+/* ---- Selected edge stroke ---- */
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #2563eb !important;
+  stroke-width: 2.5;
+}
+
+.react-flow__edge-path {
+  stroke: #1f2937;
+  stroke-width: 2;
+}
