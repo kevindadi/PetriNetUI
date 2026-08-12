@@ -42,6 +42,14 @@ import {
   type AIPetriNet,
 } from "./types";
 import { makeTranslator, languages, type Language } from "./i18n";
+import {
+  initialMarking,
+  enabledTransitions,
+  fireTransition,
+  analyze,
+  type Marking,
+  type AnalysisResult,
+} from "./simulation";
 
 const nodeTypes = { place: PlaceNode, transition: TransitionNode };
 const edgeTypes = { arc: ArcEdge };
@@ -83,7 +91,7 @@ function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-  const [activePanel, setActivePanel] = useState<"chat" | "props">("chat");
+  const [activePanel, setActivePanel] = useState<"chat" | "props" | "simulation">("chat");
   const [selectMode, setSelectMode] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(false);
   const [lang, setLang] = useState<Language>(() => {
@@ -91,6 +99,11 @@ function App() {
     return saved === "zh" || saved === "en" ? (saved as Language) : "en";
   });
   const t = useMemo(() => makeTranslator(lang), [lang]);
+  const [marking, setMarking] = useState<Marking>({});
+  const [simulating, setSimulating] = useState(false);
+  const [autoPlay, setAutoPlay] = useState(false);
+  const [stepCount, setStepCount] = useState(0);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const rfInstance = useRef<ReactFlowInstance<PetriNode, PetriEdge> | null>(null);
 
   const pastRef = useRef<PetriNet[]>([]);
@@ -264,8 +277,25 @@ function App() {
     setPendingSource(null);
   }, []);
 
+  const enabled = useMemo(
+    () => (simulating ? enabledTransitions(nodes, edges, marking) : []),
+    [simulating, nodes, edges, marking],
+  );
+
+  const fireTransitionById = useCallback(
+    (id: string) => {
+      setMarking((m) => fireTransition(edges, m, id));
+      setStepCount((c) => c + 1);
+    },
+    [edges],
+  );
+
   const onNodeClick = useCallback(
     (_event: MouseEvent, node: PetriNode) => {
+      if (simulating && node.type === "transition" && enabled.includes(node.id)) {
+        fireTransitionById(node.id);
+        return;
+      }
       if (!arcMode) return;
       if (!pendingSource) {
         setPendingSource(node.id);
@@ -295,19 +325,82 @@ function App() {
       );
       setPendingSource(null);
     },
-    [arcMode, pendingSource, nodes, edges, arcType, setEdges, scheduleCommit],
+    [
+      simulating,
+      enabled,
+      fireTransitionById,
+      arcMode,
+      pendingSource,
+      nodes,
+      edges,
+      arcType,
+      setEdges,
+      scheduleCommit,
+    ],
   );
 
   const onPaneClick = useCallback(() => {
     if (arcMode) setPendingSource(null);
   }, [arcMode]);
 
+  const startSimulation = useCallback(() => {
+    setMarking(initialMarking(nodes));
+    setStepCount(0);
+    setAnalysis(null);
+    setAutoPlay(false);
+    setSimulating(true);
+  }, [nodes]);
+
+  const resetSimulation = useCallback(() => {
+    setMarking(initialMarking(nodes));
+    setStepCount(0);
+  }, [nodes]);
+
+  const stopSimulation = useCallback(() => {
+    setSimulating(false);
+    setAutoPlay(false);
+  }, []);
+
+  const fireStep = useCallback(() => {
+    const list = enabledTransitions(nodes, edges, marking);
+    if (list.length === 0) {
+      setAutoPlay(false);
+      return;
+    }
+    const id = list[Math.floor(Math.random() * list.length)];
+    fireTransitionById(id);
+  }, [nodes, edges, marking, fireTransitionById]);
+
+  const runAnalysis = useCallback(() => {
+    const init = simulating ? marking : initialMarking(nodes);
+    setAnalysis(analyze(nodes, edges, init));
+  }, [nodes, edges, simulating, marking]);
+
+  useEffect(() => {
+    if (!autoPlay || !simulating) return;
+    const id = setInterval(fireStep, 600);
+    return () => clearInterval(id);
+  }, [autoPlay, simulating, fireStep]);
+
   const displayNodes = useMemo(() => {
-    if (!pendingSource) return nodes;
-    return nodes.map((n) =>
-      n.id === pendingSource ? { ...n, className: "pending-source" } : n,
-    );
-  }, [nodes, pendingSource]);
+    return nodes.map((n) => {
+      let className = n.className;
+      if (pendingSource && n.id === pendingSource) {
+        className = className ? `${className} pending-source` : "pending-source";
+      }
+      let data = n.data;
+      if (n.type === "place" && simulating) {
+        data = { ...data, tokens: marking[n.id] ?? 0 } as PlaceData;
+      }
+      if (n.type === "transition" && enabled.includes(n.id)) {
+        className = className
+          ? `${className} enabled-transition`
+          : "enabled-transition";
+      }
+      if (className === n.className && data === n.data) return n;
+      return { ...n, className, data };
+    });
+  }, [nodes, pendingSource, simulating, marking, enabled]);
 
   const onNodesDelete = useCallback(
     (deleted: PetriNode[]) => {
@@ -575,6 +668,12 @@ function App() {
             >
               {t("tabProps")}
             </button>
+            <button
+              className={activePanel === "simulation" ? "active" : ""}
+              onClick={() => setActivePanel("simulation")}
+            >
+              {t("tabSimulation")}
+            </button>
           </div>
 
           {activePanel === "chat" ? (
@@ -609,6 +708,80 @@ function App() {
                   {t("send")}
                 </button>
               </div>
+            </div>
+          ) : activePanel === "simulation" ? (
+            <div className="sim-panel">
+              <div className="sim-controls">
+                {!simulating ? (
+                  <button onClick={startSimulation}>{t("simStart")}</button>
+                ) : (
+                  <>
+                    <button onClick={fireStep} disabled={enabled.length === 0}>
+                      {t("simStep")}
+                    </button>
+                    <button onClick={() => setAutoPlay((a) => !a)}>
+                      {autoPlay ? t("simPause") : t("simAuto")}
+                    </button>
+                    <button onClick={resetSimulation}>{t("simReset")}</button>
+                    <button onClick={stopSimulation}>{t("simStop")}</button>
+                  </>
+                )}
+              </div>
+
+              {simulating && (
+                <div className="sim-status">
+                  <p className="sim-steps">{t("simSteps", { count: stepCount })}</p>
+                  <h3>{t("simMarking")}</h3>
+                  <div className="sim-marking">
+                    {nodes
+                      .filter((n) => n.type === "place")
+                      .map((p) => (
+                        <div key={p.id} className="sim-marking-row">
+                          <span>{(p.data as PlaceData).label}</span>
+                          <span>{marking[p.id] ?? 0}</span>
+                        </div>
+                      ))}
+                  </div>
+                  <h3>{t("simEnabled")}</h3>
+                  <div className="sim-enabled">
+                    {enabled.length === 0 ? (
+                      <p className="hint">{t("simNoEnabled")}</p>
+                    ) : (
+                      enabled.map((id) => {
+                        const tn = nodes.find((n) => n.id === id);
+                        return (
+                          <button key={id} onClick={() => fireTransitionById(id)}>
+                            {(tn?.data as TransitionData).label ?? id}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <button className="sim-analyze-btn" onClick={runAnalysis}>
+                {t("simAnalyze")}
+              </button>
+
+              {analysis && (
+                <div className="sim-analysis">
+                  <p>{t("simStates", { count: analysis.stateCount })}</p>
+                  <p>{analysis.truncated ? t("simUnbounded") : t("simBounded")}</p>
+                  <p>{t("simDeadlocks", { count: analysis.deadlockCount })}</p>
+                  <h3>{t("simMaxTokens")}</h3>
+                  <div className="sim-marking">
+                    {nodes
+                      .filter((n) => n.type === "place")
+                      .map((p) => (
+                        <div key={p.id} className="sim-marking-row">
+                          <span>{(p.data as PlaceData).label}</span>
+                          <span>{analysis.maxTokens[p.id] ?? 0}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="props-panel">

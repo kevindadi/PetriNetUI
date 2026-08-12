@@ -35,6 +35,23 @@ const en = {
   type: "Type",
   propsHint:
     "Click a place, transition or arc to edit it. Drag from a node's edge to another node to create an arc. Press Delete to remove.",
+  tabSimulation: "Simulation",
+  simStart: "Start",
+  simStep: "Step",
+  simAuto: "Auto Play",
+  simPause: "Pause",
+  simReset: "Reset",
+  simStop: "Stop",
+  simMarking: "Current marking",
+  simEnabled: "Enabled transitions",
+  simNoEnabled: "No enabled transitions (deadlock)",
+  simAnalyze: "Analyze",
+  simStates: "Reachable states: {count}",
+  simBounded: "Bounded",
+  simUnbounded: "State space exceeded limit (possibly unbounded)",
+  simDeadlocks: "Deadlock states: {count}",
+  simMaxTokens: "Max tokens",
+  simSteps: "Steps: {count}",
 } as const;
 
 export type TranslationKey = keyof typeof en;
@@ -72,6 +89,23 @@ const zh: Record<TranslationKey, string> = {
   weight: "权重",
   type: "类型",
   propsHint: "点击库所、变迁或弧进行编辑。从节点边缘拖拽到另一节点创建弧。按 Delete 删除。",
+  tabSimulation: "仿真",
+  simStart: "开始",
+  simStep: "单步",
+  simAuto: "自动运行",
+  simPause: "暂停",
+  simReset: "重置",
+  simStop: "停止",
+  simMarking: "当前标记",
+  simEnabled: "使能的变迁",
+  simNoEnabled: "无使能变迁（死锁）",
+  simAnalyze: "分析",
+  simStates: "可达状态数：{count}",
+  simBounded: "有界",
+  simUnbounded: "状态空间超限（可能无界）",
+  simDeadlocks: "死锁状态数：{count}",
+  simMaxTokens: "最大 token 数",
+  simSteps: "步数：{count}",
 };
 
 const translations: Record<Language, Record<TranslationKey, string>> = { en, zh };
