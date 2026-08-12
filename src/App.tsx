@@ -99,9 +99,13 @@ function App() {
       const s = nodes.find((n) => n.id === conn.source);
       const t = nodes.find((n) => n.id === conn.target);
       if (!s || !t) return false;
-      return s.type !== t.type;
+      if (s.type === t.type) return false;
+      const exists = edges.some(
+        (e) => e.source === conn.source && e.target === conn.target,
+      );
+      return !exists;
     },
-    [nodes],
+    [nodes, edges],
   );
 
   const onConnect = useCallback(
