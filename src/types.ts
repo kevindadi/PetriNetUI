@@ -69,3 +69,84 @@ export function createArc(
     data: { weight, arcType },
   };
 }
+
+export type AIPlace = {
+  id?: string;
+  label?: string;
+  tokens?: number;
+  x?: number;
+  y?: number;
+};
+
+export type AITransition = {
+  id?: string;
+  label?: string;
+  x?: number;
+  y?: number;
+};
+
+export type AIArc = {
+  from?: string;
+  to?: string;
+  weight?: number;
+  type?: ArcType;
+};
+
+export type AIPetriNet = {
+  places?: AIPlace[];
+  transitions?: AITransition[];
+  arcs?: AIArc[];
+};
+
+export function aiNetToPetriNet(net: AIPetriNet): PetriNet {
+  const nodes: PetriNode[] = [];
+  const edges: PetriEdge[] = [];
+  const idMap: Record<string, string> = {};
+
+  for (const p of net.places ?? []) {
+    const nodeId = p.id && p.id.length > 0 ? p.id : nextId("p");
+    idMap[p.id ?? nodeId] = nodeId;
+    nodes.push({
+      id: nodeId,
+      type: "place",
+      position: { x: p.x ?? 100, y: p.y ?? 100 },
+      data: {
+        kind: "place",
+        label: p.label ?? nodeId,
+        tokens: Math.max(0, Math.floor(p.tokens ?? 0)),
+      },
+    });
+  }
+
+  for (const t of net.transitions ?? []) {
+    const nodeId = t.id && t.id.length > 0 ? t.id : nextId("t");
+    idMap[t.id ?? nodeId] = nodeId;
+    nodes.push({
+      id: nodeId,
+      type: "transition",
+      position: { x: t.x ?? 100, y: t.y ?? 100 },
+      data: { kind: "transition", label: t.label ?? nodeId },
+    });
+  }
+
+  for (const a of net.arcs ?? []) {
+    const source = a.from ? idMap[a.from] : undefined;
+    const target = a.to ? idMap[a.to] : undefined;
+    if (!source || !target || source === target) continue;
+    const sNode = nodes.find((n) => n.id === source);
+    const tNode = nodes.find((n) => n.id === target);
+    if (!sNode || !tNode || sNode.type === tNode.type) continue;
+    edges.push(
+      createArc(
+        source,
+        target,
+        "out",
+        "in",
+        Math.max(1, Math.floor(a.weight ?? 1)),
+        a.type ?? "normal",
+      ),
+    );
+  }
+
+  return { nodes, edges };
+}

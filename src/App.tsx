@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type MouseEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   ReactFlow,
   Background,
@@ -16,7 +16,9 @@ import {
   type Node,
   type Edge,
   type OnSelectionChangeParams,
+  type ReactFlowInstance,
 } from "@xyflow/react";
+import { invoke } from "@tauri-apps/api/core";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
 import "@xyflow/react/dist/style.css";
@@ -28,6 +30,7 @@ import {
   createPlace,
   createTransition,
   createArc,
+  aiNetToPetriNet,
   type PetriNode,
   type PetriEdge,
   type PetriNet,
@@ -35,6 +38,7 @@ import {
   type TransitionData,
   type ArcType,
   type ArcData,
+  type AIPetriNet,
 } from "./types";
 
 const nodeTypes = { place: PlaceNode, transition: TransitionNode };
@@ -49,6 +53,8 @@ type Selection =
   | { kind: "node"; id: string }
   | { kind: "edge"; id: string }
   | null;
+
+type ChatMessage = { role: "user" | "assistant"; content: string };
 
 function App() {
   const initialNet = useMemo<PetriNet>(() => {
@@ -72,6 +78,11 @@ function App() {
   const [arcMode, setArcMode] = useState(false);
   const [arcType, setArcType] = useState<ArcType>("normal");
   const [pendingSource, setPendingSource] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [activePanel, setActivePanel] = useState<"chat" | "props">("chat");
+  const rfInstance = useRef<ReactFlowInstance<PetriNode, PetriEdge> | null>(null);
 
   const onNodesChangeWrapped = useCallback(
     (changes: NodeChange<PetriNode>[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -253,6 +264,38 @@ function App() {
     setEdges(net.edges ?? []);
   }, [setNodes, setEdges]);
 
+  const sendChat = useCallback(async () => {
+    const prompt = chatInput.trim();
+    if (!prompt || chatLoading) return;
+    setChatInput("");
+    setChatMessages((m) => [...m, { role: "user", content: prompt }]);
+    setChatLoading(true);
+    try {
+      const raw = await invoke<string>("generate_petri_net", { prompt });
+      const net = aiNetToPetriNet(JSON.parse(raw) as AIPetriNet);
+      setNodes(net.nodes);
+      setEdges(net.edges);
+      setSelection(null);
+      const placeCount = net.nodes.filter((n) => n.type === "place").length;
+      const transitionCount = net.nodes.length - placeCount;
+      setChatMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: `已生成：${placeCount} 个库所、${transitionCount} 个变迁、${net.edges.length} 条弧。`,
+        },
+      ]);
+      setTimeout(() => rfInstance.current?.fitView({ padding: 0.2 }), 80);
+    } catch (e) {
+      setChatMessages((m) => [
+        ...m,
+        { role: "assistant", content: `生成失败：${String(e)}` },
+      ]);
+    } finally {
+      setChatLoading(false);
+    }
+  }, [chatInput, chatLoading, setNodes, setEdges]);
+
   const selectedNode = selection?.kind === "node" ? nodes.find((n) => n.id === selection.id) : undefined;
   const selectedEdge = selection?.kind === "edge" ? edges.find((e) => e.id === selection.id) : undefined;
   const placeNode =
@@ -321,6 +364,9 @@ function App() {
             defaultEdgeOptions={defaultEdgeOptions}
             deleteKeyCode={["Backspace", "Delete"]}
             fitView
+            onInit={(inst) => {
+              rfInstance.current = inst;
+            }}
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={16} />
@@ -334,75 +380,127 @@ function App() {
         </div>
 
         <aside className="inspector">
-          <h2>Properties</h2>
-          {!selection && (
-            <p className="hint">
-              Click a place, transition or arc to edit it. Drag from a node's edge to
-              another node to create an arc. Press Delete to remove.
-            </p>
-          )}
-          {placeNode && (
-            <form className="props" onSubmit={(e) => e.preventDefault()}>
-              <label>
-                Name
-                <input
-                  value={placeNode.data.label}
-                  onChange={(e) => updateNodeData(placeNode.id, { label: e.target.value })}
+          <div className="panel-tabs">
+            <button
+              className={activePanel === "chat" ? "active" : ""}
+              onClick={() => setActivePanel("chat")}
+            >
+              AI Chat
+            </button>
+            <button
+              className={activePanel === "props" ? "active" : ""}
+              onClick={() => setActivePanel("props")}
+            >
+              Properties
+            </button>
+          </div>
+
+          {activePanel === "chat" ? (
+            <div className="chat-panel">
+              <div className="chat-messages">
+                {chatMessages.length === 0 && (
+                  <p className="hint">
+                    描述你想建立的 Petri 网，例如：“一个生产者-消费者系统，包含两个库所和一个变迁”。
+                  </p>
+                )}
+                {chatMessages.map((msg, i) => (
+                  <div key={i} className={`chat-msg ${msg.role}`}>
+                    {msg.content}
+                  </div>
+                ))}
+                {chatLoading && <div className="chat-msg assistant">正在生成…</div>}
+              </div>
+              <div className="chat-input">
+                <textarea
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="描述 Petri 网…"
+                  rows={3}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      sendChat();
+                    }
+                  }}
                 />
-              </label>
-              <label>
-                Tokens
-                <input
-                  type="number"
-                  min={0}
-                  value={placeNode.data.tokens}
-                  onChange={(e) =>
-                    updateNodeData(placeNode.id, {
-                      tokens: Math.max(0, Number(e.target.value)),
-                    })
-                  }
-                />
-              </label>
-            </form>
-          )}
-          {transitionNode && (
-            <form className="props" onSubmit={(e) => e.preventDefault()}>
-              <label>
-                Name
-                <input
-                  value={transitionNode.data.label}
-                  onChange={(e) => updateNodeData(transitionNode.id, { label: e.target.value })}
-                />
-              </label>
-            </form>
-          )}
-          {selectedEdge && (
-            <form className="props" onSubmit={(e) => e.preventDefault()}>
-              <label>
-                Weight
-                <input
-                  type="number"
-                  min={1}
-                  value={selectedEdge.data?.weight ?? 1}
-                  onChange={(e) =>
-                    updateEdgeWeight(selectedEdge.id, Math.max(1, Number(e.target.value)))
-                  }
-                />
-              </label>
-              <label>
-                Type
-                <select
-                  value={selectedEdge.data?.arcType ?? "normal"}
-                  onChange={(e) =>
-                    updateEdgeType(selectedEdge.id, e.target.value as ArcType)
-                  }
-                >
-                  <option value="normal">Normal</option>
-                  <option value="reset">Reset</option>
-                  <option value="inhibitor">Inhibitor</option>
-                </select>
-              </label>
-            </form>
+                <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}>
+                  发送
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="props-panel">
+              <h2>Properties</h2>
+              {!selection && (
+                <p className="hint">
+                  Click a place, transition or arc to edit it. Drag from a node's edge to
+                  another node to create an arc. Press Delete to remove.
+                </p>
+              )}
+              {placeNode && (
+                <form className="props" onSubmit={(e) => e.preventDefault()}>
+                  <label>
+                    Name
+                    <input
+                      value={placeNode.data.label}
+                      onChange={(e) => updateNodeData(placeNode.id, { label: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Tokens
+                    <input
+                      type="number"
+                      min={0}
+                      value={placeNode.data.tokens}
+                      onChange={(e) =>
+                        updateNodeData(placeNode.id, {
+                          tokens: Math.max(0, Number(e.target.value)),
+                        })
+                      }
+                    />
+                  </label>
+                </form>
+              )}
+              {transitionNode && (
+                <form className="props" onSubmit={(e) => e.preventDefault()}>
+                  <label>
+                    Name
+                    <input
+                      value={transitionNode.data.label}
+                      onChange={(e) => updateNodeData(transitionNode.id, { label: e.target.value })}
+                    />
+                  </label>
+                </form>
+              )}
+              {selectedEdge && (
+                <form className="props" onSubmit={(e) => e.preventDefault()}>
+                  <label>
+                    Weight
+                    <input
+                      type="number"
+                      min={1}
+                      value={selectedEdge.data?.weight ?? 1}
+                      onChange={(e) =>
+                        updateEdgeWeight(selectedEdge.id, Math.max(1, Number(e.target.value)))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Type
+                    <select
+                      value={selectedEdge.data?.arcType ?? "normal"}
+                      onChange={(e) =>
+                        updateEdgeType(selectedEdge.id, e.target.value as ArcType)
+                      }
+                    >
+                      <option value="normal">Normal</option>
+                      <option value="reset">Reset</option>
+                      <option value="inhibitor">Inhibitor</option>
+                    </select>
+                  </label>
+                </form>
+              )}
+            </div>
           )}
         </aside>
       </div>
