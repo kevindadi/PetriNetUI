@@ -41,6 +41,7 @@ import {
   type ArcData,
   type AIPetriNet,
 } from "./types";
+import { makeTranslator, languages, type Language } from "./i18n";
 
 const nodeTypes = { place: PlaceNode, transition: TransitionNode };
 const edgeTypes = { arc: ArcEdge };
@@ -85,6 +86,11 @@ function App() {
   const [activePanel, setActivePanel] = useState<"chat" | "props">("chat");
   const [selectMode, setSelectMode] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(false);
+  const [lang, setLang] = useState<Language>(() => {
+    const saved = localStorage.getItem("pn-lang");
+    return saved === "zh" || saved === "en" ? (saved as Language) : "en";
+  });
+  const t = useMemo(() => makeTranslator(lang), [lang]);
   const rfInstance = useRef<ReactFlowInstance<PetriNode, PetriEdge> | null>(null);
 
   const pastRef = useRef<PetriNet[]>([]);
@@ -414,19 +420,23 @@ function App() {
         ...m,
         {
           role: "assistant",
-          content: `已生成：${placeCount} 个库所、${transitionCount} 个变迁、${net.edges.length} 条弧。`,
+          content: t("generated", {
+            places: placeCount,
+            transitions: transitionCount,
+            arcs: net.edges.length,
+          }),
         },
       ]);
       setTimeout(() => rfInstance.current?.fitView({ padding: 0.2 }), 80);
     } catch (e) {
       setChatMessages((m) => [
         ...m,
-        { role: "assistant", content: `生成失败：${String(e)}` },
+        { role: "assistant", content: t("generationFailed", { error: String(e) }) },
       ]);
     } finally {
       setChatLoading(false);
     }
-  }, [chatInput, chatLoading, setNodes, setEdges, scheduleCommit]);
+  }, [chatInput, chatLoading, setNodes, setEdges, scheduleCommit, t]);
 
   const selectedNode = selection?.kind === "node" ? nodes.find((n) => n.id === selection.id) : undefined;
   const selectedEdge = selection?.kind === "edge" ? edges.find((e) => e.id === selection.id) : undefined;
@@ -442,60 +452,75 @@ function App() {
   return (
     <div className="app">
       <div className="toolbar">
-        <button onClick={undo} disabled={!canUndo} title="撤销 (Ctrl/Cmd+Z)">
-          Undo
+        <button onClick={undo} disabled={!canUndo} title={t("undoTitle")}>
+          {t("undo")}
         </button>
-        <button onClick={redo} disabled={!canRedo} title="重做 (Ctrl/Cmd+Shift+Z)">
-          Redo
+        <button onClick={redo} disabled={!canRedo} title={t("redoTitle")}>
+          {t("redo")}
         </button>
-        <button onClick={addPlace}>+ Place</button>
-        <button onClick={addTransition}>+ Transition</button>
+        <button onClick={addPlace}>{t("addPlace")}</button>
+        <button onClick={addTransition}>{t("addTransition")}</button>
         <button className={arcMode ? "active" : ""} onClick={toggleArcMode}>
-          + Arc
+          {t("addArc")}
         </button>
         <span className="arc-types">
           <button
             className={arcType === "normal" ? "active" : ""}
             onClick={() => setArcType("normal")}
           >
-            Normal
+            {t("arcNormal")}
           </button>
           <button
             className={arcType === "reset" ? "active" : ""}
             onClick={() => setArcType("reset")}
           >
-            Reset
+            {t("arcReset")}
           </button>
           <button
             className={arcType === "inhibitor" ? "active" : ""}
             onClick={() => setArcType("inhibitor")}
           >
-            Inhibit
+            {t("arcInhibit")}
           </button>
         </span>
         {arcMode && (
           <span className="arc-mode-hint">
-            {pendingSource ? "点击目标节点以创建弧" : "点击起点节点"}
+            {pendingSource ? t("arcTargetHint") : t("arcSourceHint")}
           </span>
         )}
         <span className="spacer" />
         <button
           className={selectMode ? "active" : ""}
           onClick={() => setSelectMode((s) => !s)}
-          title="框选模式（开启后左键拖拽框选，中键/右键平移）"
+          title={t("selectTitle")}
         >
-          Select
+          {t("select")}
         </button>
         <button
           className={snapEnabled ? "active" : ""}
           onClick={() => setSnapEnabled((s) => !s)}
-          title="网格吸附"
+          title={t("snapTitle")}
         >
-          Snap
+          {t("snap")}
         </button>
-        <button onClick={clearAll}>Clear</button>
-        <button onClick={handleOpen}>Open</button>
-        <button onClick={handleSave}>Save</button>
+        <button onClick={clearAll}>{t("clear")}</button>
+        <button onClick={handleOpen}>{t("open")}</button>
+        <button onClick={handleSave}>{t("save")}</button>
+        <select
+          className="lang-select"
+          value={lang}
+          onChange={(e) => {
+            const next = e.target.value as Language;
+            setLang(next);
+            localStorage.setItem("pn-lang", next);
+          }}
+        >
+          {languages.map((l) => (
+            <option key={l.code} value={l.code}>
+              {l.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="workspace">
@@ -542,13 +567,13 @@ function App() {
               className={activePanel === "chat" ? "active" : ""}
               onClick={() => setActivePanel("chat")}
             >
-              AI Chat
+              {t("tabChat")}
             </button>
             <button
               className={activePanel === "props" ? "active" : ""}
               onClick={() => setActivePanel("props")}
             >
-              Properties
+              {t("tabProps")}
             </button>
           </div>
 
@@ -556,22 +581,22 @@ function App() {
             <div className="chat-panel">
               <div className="chat-messages">
                 {chatMessages.length === 0 && (
-                  <p className="hint">
-                    描述你想建立的 Petri 网，例如：“一个生产者-消费者系统，包含两个库所和一个变迁”。
-                  </p>
+                  <p className="hint">{t("chatHint")}</p>
                 )}
                 {chatMessages.map((msg, i) => (
                   <div key={i} className={`chat-msg ${msg.role}`}>
                     {msg.content}
                   </div>
                 ))}
-                {chatLoading && <div className="chat-msg assistant">正在生成…</div>}
+                {chatLoading && (
+                  <div className="chat-msg assistant">{t("generating")}</div>
+                )}
               </div>
               <div className="chat-input">
                 <textarea
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="描述 Petri 网…"
+                  placeholder={t("chatPlaceholder")}
                   rows={3}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -581,23 +606,18 @@ function App() {
                   }}
                 />
                 <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}>
-                  发送
+                  {t("send")}
                 </button>
               </div>
             </div>
           ) : (
             <div className="props-panel">
-              <h2>Properties</h2>
-              {!selection && (
-                <p className="hint">
-                  Click a place, transition or arc to edit it. Drag from a node's edge to
-                  another node to create an arc. Press Delete to remove.
-                </p>
-              )}
+              <h2>{t("tabProps")}</h2>
+              {!selection && <p className="hint">{t("propsHint")}</p>}
               {placeNode && (
                 <form className="props" onSubmit={(e) => e.preventDefault()}>
                   <label>
-                    Name
+                    {t("name")}
                     <input
                       value={placeNode.data.label}
                       onFocus={scheduleCommit}
@@ -605,7 +625,7 @@ function App() {
                     />
                   </label>
                   <label>
-                    Tokens
+                    {t("tokens")}
                     <input
                       type="number"
                       min={0}
@@ -623,7 +643,7 @@ function App() {
               {transitionNode && (
                 <form className="props" onSubmit={(e) => e.preventDefault()}>
                   <label>
-                    Name
+                    {t("name")}
                     <input
                       value={transitionNode.data.label}
                       onFocus={scheduleCommit}
@@ -635,7 +655,7 @@ function App() {
               {selectedEdge && (
                 <form className="props" onSubmit={(e) => e.preventDefault()}>
                   <label>
-                    Weight
+                    {t("weight")}
                     <input
                       type="number"
                       min={1}
@@ -647,7 +667,7 @@ function App() {
                     />
                   </label>
                   <label>
-                    Type
+                    {t("type")}
                     <select
                       value={selectedEdge.data?.arcType ?? "normal"}
                       onFocus={scheduleCommit}
@@ -655,9 +675,9 @@ function App() {
                         updateEdgeType(selectedEdge.id, e.target.value as ArcType)
                       }
                     >
-                      <option value="normal">Normal</option>
-                      <option value="reset">Reset</option>
-                      <option value="inhibitor">Inhibitor</option>
+                      <option value="normal">{t("arcNormal")}</option>
+                      <option value="reset">{t("arcReset")}</option>
+                      <option value="inhibitor">{t("arcInhibit")}</option>
                     </select>
                   </label>
                 </form>

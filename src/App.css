@@ -80,6 +80,15 @@ body,
   font-weight: 500;
 }
 
+.lang-select {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
 .workspace {
   display: flex;
   flex: 1;
