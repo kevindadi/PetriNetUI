@@ -41,6 +41,8 @@ import {
   type TransitionData,
   type ArcType,
   type ArcData,
+  type NetKind,
+  type CapacityMode,
 } from "./types";
 import { makeTranslator, languages, type Language } from "./i18n";
 import {
@@ -96,6 +98,7 @@ function App() {
   const [activePanel, setActivePanel] = useState<"chat" | "props" | "simulation">("chat");
   const [selectMode, setSelectMode] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(false);
+  const [netKind, setNetKind] = useState<NetKind>("pt");
   const [lang, setLang] = useState<Language>(() => {
     const saved = localStorage.getItem("pn-lang");
     return saved === "zh" || saved === "en" ? (saved as Language) : "en";
@@ -286,10 +289,10 @@ function App() {
 
   const fireTransitionById = useCallback(
     (id: string) => {
-      setMarking((m) => fireTransition(edges, m, id));
+      setMarking((m) => fireTransition(nodes, edges, m, id));
       setStepCount((c) => c + 1);
     },
-    [edges],
+    [nodes, edges],
   );
 
   const onNodeClick = useCallback(
@@ -631,6 +634,20 @@ function App() {
         <button onClick={handleSave}>{t("save")}</button>
         <select
           className="lang-select"
+          value={netKind}
+          onChange={(e) => setNetKind(e.target.value as NetKind)}
+          title={t("netType")}
+        >
+          <option value="pt">{t("netTypePt")}</option>
+          <option value="timed" disabled>
+            {t("netTypeTimed")}
+          </option>
+          <option value="cvn" disabled>
+            {t("netTypeCvn")}
+          </option>
+        </select>
+        <select
+          className="lang-select"
           value={lang}
           onChange={(e) => {
             const next = e.target.value as Language;
@@ -841,6 +858,39 @@ function App() {
                       }
                     />
                   </label>
+                  <label>
+                    {t("capacity")}
+                    <input
+                      type="number"
+                      min={0}
+                      value={placeNode.data.capacity ?? ""}
+                      placeholder={t("unbounded")}
+                      onFocus={scheduleCommit}
+                      onChange={(e) =>
+                        updateNodeData(placeNode.id, {
+                          capacity:
+                            e.target.value === ""
+                              ? null
+                              : Math.max(0, Number(e.target.value)),
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    {t("capacityMode")}
+                    <select
+                      value={placeNode.data.capacityMode ?? "reject"}
+                      onFocus={scheduleCommit}
+                      onChange={(e) =>
+                        updateNodeData(placeNode.id, {
+                          capacityMode: e.target.value as CapacityMode,
+                        })
+                      }
+                    >
+                      <option value="reject">{t("capacityReject")}</option>
+                      <option value="saturate">{t("capacitySaturate")}</option>
+                    </select>
+                  </label>
                 </form>
               )}
               {transitionNode && (
@@ -851,6 +901,21 @@ function App() {
                       value={transitionNode.data.label}
                       onFocus={scheduleCommit}
                       onChange={(e) => updateNodeData(transitionNode.id, { label: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    {t("priority")}
+                    <input
+                      type="number"
+                      value={transitionNode.data.priority ?? ""}
+                      placeholder="—"
+                      onFocus={scheduleCommit}
+                      onChange={(e) =>
+                        updateNodeData(transitionNode.id, {
+                          priority:
+                            e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
                     />
                   </label>
                 </form>

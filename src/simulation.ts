@@ -11,6 +11,7 @@ export function initialMarking(nodes: PetriNode[]): Marking {
 }
 
 export function isEnabled(
+  nodes: PetriNode[],
   edges: PetriEdge[],
   marking: Marking,
   transitionId: string,
@@ -26,6 +27,16 @@ export function isEnabled(
       if (tokens < w) return false;
     }
   }
+  for (const e of edges) {
+    if (e.source !== transitionId) continue;
+    const place = nodes.find((n) => n.id === e.target);
+    if (!place || place.type !== "place") continue;
+    const d = place.data as PlaceData;
+    if (d.capacity != null && d.capacityMode !== "saturate") {
+      const w = e.data?.weight ?? 1;
+      if ((marking[e.target] ?? 0) + w > d.capacity) return false;
+    }
+  }
   return true;
 }
 
@@ -35,11 +46,12 @@ export function enabledTransitions(
   marking: Marking,
 ): string[] {
   return nodes
-    .filter((n) => n.type === "transition" && isEnabled(edges, marking, n.id))
+    .filter((n) => n.type === "transition" && isEnabled(nodes, edges, marking, n.id))
     .map((n) => n.id);
 }
 
 export function fireTransition(
+  nodes: PetriNode[],
   edges: PetriEdge[],
   marking: Marking,
   transitionId: string,
@@ -48,7 +60,15 @@ export function fireTransition(
   for (const e of edges) {
     if (e.source === transitionId) {
       const w = e.data?.weight ?? 1;
-      next[e.target] = (next[e.target] ?? 0) + w;
+      let produced = (next[e.target] ?? 0) + w;
+      const place = nodes.find((n) => n.id === e.target);
+      if (place && place.type === "place") {
+        const d = place.data as PlaceData;
+        if (d.capacity != null && d.capacityMode === "saturate" && produced > d.capacity) {
+          produced = d.capacity;
+        }
+      }
+      next[e.target] = produced;
     } else if (e.target === transitionId) {
       const arcType = e.data?.arcType ?? "normal";
       if (arcType === "normal") {
@@ -98,10 +118,10 @@ export function analyze(
   while (queue.length > 0) {
     const m = queue.shift()!;
     updateMax(m);
-    const enabled = transitions.filter((t) => isEnabled(edges, m, t));
+    const enabled = transitions.filter((t) => isEnabled(nodes, edges, m, t));
     if (enabled.length === 0) deadlockMarkings.push(m);
     for (const t of enabled) {
-      const next = fireTransition(edges, m, t);
+      const next = fireTransition(nodes, edges, m, t);
       const k = keyOf(next);
       if (!visited.has(k)) {
         if (visited.size >= maxStates) {

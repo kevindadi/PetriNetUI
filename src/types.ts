@@ -1,14 +1,21 @@
 import type { Node, Edge } from "@xyflow/react";
 
+export type NetKind = "pt" | "timed" | "cvn";
+
+export type CapacityMode = "reject" | "saturate";
+
 export type PlaceData = {
   kind: "place";
   label: string;
   tokens: number;
+  capacity?: number | null;
+  capacityMode?: CapacityMode;
 };
 
 export type TransitionData = {
   kind: "transition";
   label: string;
+  priority?: number | null;
 };
 
 export type ArcType = "normal" | "reset" | "inhibitor";
@@ -38,7 +45,13 @@ export function createPlace(x: number, y: number): Node<PlaceData, "place"> {
     id: nextId("p"),
     type: "place",
     position: { x, y },
-    data: { kind: "place", label: `P${idCounter}`, tokens: 0 },
+    data: {
+      kind: "place",
+      label: `P${idCounter}`,
+      tokens: 0,
+      capacity: null,
+      capacityMode: "reject",
+    },
   };
 }
 
@@ -47,7 +60,7 @@ export function createTransition(x: number, y: number): Node<TransitionData, "tr
     id: nextId("t"),
     type: "transition",
     position: { x, y },
-    data: { kind: "transition", label: `T${idCounter}` },
+    data: { kind: "transition", label: `T${idCounter}`, priority: null },
   };
 }
 
@@ -114,6 +127,8 @@ export function aiNetToPetriNet(net: AIPetriNet): PetriNet {
         kind: "place",
         label: p.label ?? nodeId,
         tokens: Math.max(0, Math.floor(p.tokens ?? 0)),
+        capacity: null,
+        capacityMode: "reject",
       },
     });
   }
@@ -125,7 +140,7 @@ export function aiNetToPetriNet(net: AIPetriNet): PetriNet {
       id: nodeId,
       type: "transition",
       position: { x: t.x ?? 100, y: t.y ?? 100 },
-      data: { kind: "transition", label: t.label ?? nodeId },
+      data: { kind: "transition", label: t.label ?? nodeId, priority: null },
     });
   }
 
@@ -156,10 +171,12 @@ export function netToSummary(nodes: PetriNode[], edges: PetriEdge[]): string {
   for (const n of nodes) {
     if (n.type === "place") {
       const d = n.data as PlaceData;
-      lines.push(`Place ${n.id} label="${d.label}" tokens=${d.tokens}`);
+      const cap = d.capacity == null ? "" : ` capacity=${d.capacity}`;
+      lines.push(`Place ${n.id} label="${d.label}" tokens=${d.tokens}${cap}`);
     } else {
       const d = n.data as TransitionData;
-      lines.push(`Transition ${n.id} label="${d.label}"`);
+      const prio = d.priority == null ? "" : ` priority=${d.priority}`;
+      lines.push(`Transition ${n.id} label="${d.label}"${prio}`);
     }
   }
   for (const e of edges) {
