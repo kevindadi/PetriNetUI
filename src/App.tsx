@@ -34,6 +34,7 @@ import {
   nextId,
   netToSummary,
   extractNet,
+  stripNetAttrs,
   type PetriNode,
   type PetriEdge,
   type PetriNet,
@@ -72,39 +73,6 @@ const defaultEdgeOptions = {
   markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "#1f2937" },
 };
 
-function stripNetAttrs(
-  nk: NetKind,
-  data: PlaceData | TransitionData,
-): PlaceData | TransitionData {
-  if (data.kind === "place") {
-    const base: PlaceData = { kind: "place", label: data.label, tokens: data.tokens };
-    if (nk === "pt" || nk === "timed") {
-      base.capacity = data.capacity ?? null;
-      if (nk === "pt") base.capacityMode = data.capacityMode ?? "reject";
-      if (nk === "timed") base.saturate = data.saturate ?? false;
-    } else {
-      base.cvnPlace = data.cvnPlace ?? { class: "control", sub: "Statement" };
-    }
-    return base;
-  }
-  const base: TransitionData = { kind: "transition", label: data.label };
-  if (nk === "pt" || nk === "timed") {
-    base.priority = data.priority ?? null;
-    if (nk === "timed") {
-      base.interval =
-        data.interval ?? { earliest: 0, latest: null, leftOpen: false, rightOpen: false };
-      base.core = data.core ?? 0;
-      base.suspendable = data.suspendable ?? false;
-    }
-  } else {
-    base.cvnKind = data.cvnKind ?? "Sequential";
-    base.scope = data.scope ?? null;
-    base.anchors = data.anchors ?? "";
-    base.family = data.family ?? null;
-  }
-  return base;
-}
-
 type Selection =
   | { kind: "node"; id: string }
   | { kind: "edge"; id: string }
@@ -120,6 +88,7 @@ function App() {
     const p2 = createPlace(510, 150);
     p2.data = { ...p2.data, label: "P2", tokens: 0 };
     return {
+      netKind: "pt",
       nodes: [p1, t1, p2],
       edges: [
         createArc(p1.id, t1.id, "out", "in", 1),
@@ -161,7 +130,7 @@ function App() {
 
   const scheduleCommit = useCallback(() => {
     if (pendingCommitRef.current) return;
-    pendingCommitRef.current = { nodes, edges };
+    pendingCommitRef.current = { netKind, nodes, edges };
     queueMicrotask(() => {
       const snapshot = pendingCommitRef.current;
       if (!snapshot) return;
@@ -171,27 +140,29 @@ function App() {
       futureRef.current = [];
       setHistoryVersion((v) => v + 1);
     });
-  }, [nodes, edges]);
+  }, [netKind, nodes, edges]);
 
   const undo = useCallback(() => {
     const prev = pastRef.current.pop();
     if (!prev) return;
-    futureRef.current.push({ nodes, edges });
+    futureRef.current.push({ netKind, nodes, edges });
+    setNetKind(prev.netKind);
     setNodes(prev.nodes.map((n) => ({ ...n, selected: false })));
     setEdges(prev.edges.map((e) => ({ ...e, selected: false })));
     setSelection(null);
     setHistoryVersion((v) => v + 1);
-  }, [nodes, edges, setNodes, setEdges]);
+  }, [netKind, nodes, edges, setNodes, setEdges]);
 
   const redo = useCallback(() => {
     const next = futureRef.current.pop();
     if (!next) return;
-    pastRef.current.push({ nodes, edges });
+    pastRef.current.push({ netKind, nodes, edges });
+    setNetKind(next.netKind);
     setNodes(next.nodes.map((n) => ({ ...n, selected: false })));
     setEdges(next.edges.map((e) => ({ ...e, selected: false })));
     setSelection(null);
     setHistoryVersion((v) => v + 1);
-  }, [nodes, edges, setNodes, setEdges]);
+  }, [netKind, nodes, edges, setNodes, setEdges]);
 
   const canUndo = pastRef.current.length > 0;
   const canRedo = futureRef.current.length > 0;
@@ -217,7 +188,7 @@ function App() {
         id: newId,
         selected: false,
         position: { x: n.position.x + 24, y: n.position.y + 24 },
-        data: structuredClone(n.data),
+        data: stripNetAttrs(netKind, n.data) as PlaceData | TransitionData,
       };
     });
     const newEdges: PetriEdge[] = clip.edges
@@ -232,7 +203,7 @@ function App() {
       }));
     setNodes((nds) => [...nds, ...newNodes]);
     setEdges((eds) => [...eds, ...newEdges]);
-  }, [scheduleCommit, setNodes, setEdges]);
+  }, [netKind, scheduleCommit, setNodes, setEdges]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -460,14 +431,14 @@ function App() {
   const addPlace = useCallback(() => {
     const offset = nodes.length * 24;
     scheduleCommit();
-    setNodes((nds) => [...nds, createPlace(160 + offset, 120 + offset)]);
-  }, [nodes.length, setNodes, scheduleCommit]);
+    setNodes((nds) => [...nds, createPlace(160 + offset, 120 + offset, netKind)]);
+  }, [nodes.length, netKind, setNodes, scheduleCommit]);
 
   const addTransition = useCallback(() => {
     const offset = nodes.length * 24;
     scheduleCommit();
-    setNodes((nds) => [...nds, createTransition(160 + offset, 120 + offset)]);
-  }, [nodes.length, setNodes, scheduleCommit]);
+    setNodes((nds) => [...nds, createTransition(160 + offset, 120 + offset, netKind)]);
+  }, [nodes.length, netKind, setNodes, scheduleCommit]);
 
   const clearAll = useCallback(() => {
     scheduleCommit();
@@ -562,14 +533,14 @@ function App() {
   );
 
   const handleSave = useCallback(async () => {
-    const net: PetriNet = { nodes, edges };
+    const net: PetriNet = { netKind, nodes, edges };
     const path = await save({
       filters: [{ name: "Petri Net", extensions: ["json"] }],
       defaultPath: "untitled.pn.json",
     });
     if (!path) return;
     await writeTextFile(path, JSON.stringify(net, null, 2));
-  }, [nodes, edges]);
+  }, [nodes, edges, netKind]);
 
   const handleOpen = useCallback(async () => {
     const path = await open({
@@ -580,6 +551,7 @@ function App() {
     const text = await readTextFile(path as string);
     const net = JSON.parse(text) as PetriNet;
     scheduleCommit();
+    setNetKind(net.netKind ?? "pt");
     setNodes(net.nodes ?? []);
     setEdges(net.edges ?? []);
   }, [setNodes, setEdges, scheduleCommit]);
@@ -604,7 +576,7 @@ function App() {
       });
       const aiNet = extractNet(raw);
       if (aiNet) {
-        const net = aiNetToPetriNet(aiNet);
+        const net = aiNetToPetriNet(aiNet, netKind);
         scheduleCommit();
         setNodes(net.nodes);
         setEdges(net.edges);
@@ -643,6 +615,7 @@ function App() {
     chatMessages,
     nodes,
     edges,
+    netKind,
     setNodes,
     setEdges,
     scheduleCommit,

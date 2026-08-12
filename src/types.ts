@@ -134,9 +134,43 @@ export type PetriNode = Node<PlaceData | TransitionData, "place" | "transition">
 export type PetriEdge = Edge<ArcData, "arc">;
 
 export type PetriNet = {
+  netKind: NetKind;
   nodes: PetriNode[];
   edges: PetriEdge[];
 };
+
+export function stripNetAttrs(
+  nk: NetKind,
+  data: PlaceData | TransitionData,
+): PlaceData | TransitionData {
+  if (data.kind === "place") {
+    const base: PlaceData = { kind: "place", label: data.label, tokens: data.tokens };
+    if (nk === "pt" || nk === "timed") {
+      base.capacity = data.capacity ?? null;
+      if (nk === "pt") base.capacityMode = data.capacityMode ?? "reject";
+      if (nk === "timed") base.saturate = data.saturate ?? false;
+    } else {
+      base.cvnPlace = data.cvnPlace ?? { class: "control", sub: "Statement" };
+    }
+    return base;
+  }
+  const base: TransitionData = { kind: "transition", label: data.label };
+  if (nk === "pt" || nk === "timed") {
+    base.priority = data.priority ?? null;
+    if (nk === "timed") {
+      base.interval =
+        data.interval ?? { earliest: 0, latest: null, leftOpen: false, rightOpen: false };
+      base.core = data.core ?? 0;
+      base.suspendable = data.suspendable ?? false;
+    }
+  } else {
+    base.cvnKind = data.cvnKind ?? "Sequential";
+    base.scope = data.scope ?? null;
+    base.anchors = data.anchors ?? "";
+    base.family = data.family ?? null;
+  }
+  return base;
+}
 
 let idCounter = 0;
 
@@ -145,28 +179,28 @@ export function nextId(prefix: string): string {
   return `${prefix}_${idCounter}`;
 }
 
-export function createPlace(x: number, y: number): Node<PlaceData, "place"> {
-  return {
+export function createPlace(x: number, y: number, nk: NetKind = "pt"): Node<PlaceData, "place"> {
+  const node: Node<PlaceData, "place"> = {
     id: nextId("p"),
     type: "place",
     position: { x, y },
-    data: {
-      kind: "place",
-      label: `P${idCounter}`,
-      tokens: 0,
-      capacity: null,
-      capacityMode: "reject",
-    },
+    data: { kind: "place", label: `P${idCounter}`, tokens: 0 },
   };
+  return { ...node, data: stripNetAttrs(nk, node.data) as PlaceData };
 }
 
-export function createTransition(x: number, y: number): Node<TransitionData, "transition"> {
-  return {
+export function createTransition(
+  x: number,
+  y: number,
+  nk: NetKind = "pt",
+): Node<TransitionData, "transition"> {
+  const node: Node<TransitionData, "transition"> = {
     id: nextId("t"),
     type: "transition",
     position: { x, y },
-    data: { kind: "transition", label: `T${idCounter}`, priority: null },
+    data: { kind: "transition", label: `T${idCounter}` },
   };
+  return { ...node, data: stripNetAttrs(nk, node.data) as TransitionData };
 }
 
 export function createArc(
@@ -216,7 +250,7 @@ export type AIPetriNet = {
   arcs?: AIArc[];
 };
 
-export function aiNetToPetriNet(net: AIPetriNet): PetriNet {
+export function aiNetToPetriNet(net: AIPetriNet, nk: NetKind = "pt"): PetriNet {
   const nodes: PetriNode[] = [];
   const edges: PetriEdge[] = [];
   const idMap: Record<string, string> = {};
@@ -228,13 +262,11 @@ export function aiNetToPetriNet(net: AIPetriNet): PetriNet {
       id: nodeId,
       type: "place",
       position: { x: p.x ?? 100, y: p.y ?? 100 },
-      data: {
+      data: stripNetAttrs(nk, {
         kind: "place",
         label: p.label ?? nodeId,
         tokens: Math.max(0, Math.floor(p.tokens ?? 0)),
-        capacity: null,
-        capacityMode: "reject",
-      },
+      }) as PlaceData,
     });
   }
 
@@ -245,7 +277,10 @@ export function aiNetToPetriNet(net: AIPetriNet): PetriNet {
       id: nodeId,
       type: "transition",
       position: { x: t.x ?? 100, y: t.y ?? 100 },
-      data: { kind: "transition", label: t.label ?? nodeId, priority: null },
+      data: stripNetAttrs(nk, {
+        kind: "transition",
+        label: t.label ?? nodeId,
+      }) as TransitionData,
     });
   }
 
@@ -268,7 +303,7 @@ export function aiNetToPetriNet(net: AIPetriNet): PetriNet {
     );
   }
 
-  return { nodes, edges };
+  return { netKind: nk, nodes, edges };
 }
 
 export function netToSummary(nodes: PetriNode[], edges: PetriEdge[]): string {
