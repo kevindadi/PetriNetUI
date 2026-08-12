@@ -150,3 +150,38 @@ export function aiNetToPetriNet(net: AIPetriNet): PetriNet {
 
   return { nodes, edges };
 }
+
+export function netToSummary(nodes: PetriNode[], edges: PetriEdge[]): string {
+  const lines: string[] = [];
+  for (const n of nodes) {
+    if (n.type === "place") {
+      const d = n.data as PlaceData;
+      lines.push(`Place ${n.id} label="${d.label}" tokens=${d.tokens}`);
+    } else {
+      const d = n.data as TransitionData;
+      lines.push(`Transition ${n.id} label="${d.label}"`);
+    }
+  }
+  for (const e of edges) {
+    lines.push(
+      `Arc ${e.source} -> ${e.target} type=${e.data?.arcType ?? "normal"} weight=${e.data?.weight ?? 1}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+export function extractNet(text: string): AIPetriNet | null {
+  const cleaned = text.replace(/```[a-zA-Z]*/g, "").replace(/```/g, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    const parsed = JSON.parse(cleaned.slice(start, end + 1)) as AIPetriNet;
+    if (parsed && (parsed.places || parsed.transitions || parsed.arcs)) {
+      return parsed;
+    }
+  } catch {
+    /* not a JSON object */
+  }
+  return null;
+}

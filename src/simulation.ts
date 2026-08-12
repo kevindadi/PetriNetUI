@@ -123,3 +123,8 @@ export function analyze(
     deadlockMarkings,
   };
 }
+
+export function summarizeAnalysis(r: AnalysisResult): string {
+  const bounded = r.truncated ? "possibly unbounded" : "bounded";
+  return `reachable states: ${r.stateCount}, ${bounded}, deadlock states: ${r.deadlockCount}`;
+}

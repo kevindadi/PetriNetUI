@@ -32,6 +32,8 @@ import {
   createArc,
   aiNetToPetriNet,
   nextId,
+  netToSummary,
+  extractNet,
   type PetriNode,
   type PetriEdge,
   type PetriNet,
@@ -39,7 +41,6 @@ import {
   type TransitionData,
   type ArcType,
   type ArcData,
-  type AIPetriNet,
 } from "./types";
 import { makeTranslator, languages, type Language } from "./i18n";
 import {
@@ -47,6 +48,7 @@ import {
   enabledTransitions,
   fireTransition,
   analyze,
+  summarizeAnalysis,
   type Marking,
   type AnalysisResult,
 } from "./simulation";
@@ -501,26 +503,44 @@ function App() {
     setChatMessages((m) => [...m, { role: "user", content: prompt }]);
     setChatLoading(true);
     try {
-      const raw = await invoke<string>("generate_petri_net", { prompt });
-      const net = aiNetToPetriNet(JSON.parse(raw) as AIPetriNet);
-      scheduleCommit();
-      setNodes(net.nodes);
-      setEdges(net.edges);
-      setSelection(null);
-      const placeCount = net.nodes.filter((n) => n.type === "place").length;
-      const transitionCount = net.nodes.length - placeCount;
-      setChatMessages((m) => [
-        ...m,
-        {
-          role: "assistant",
-          content: t("generated", {
-            places: placeCount,
-            transitions: transitionCount,
-            arcs: net.edges.length,
-          }),
-        },
-      ]);
-      setTimeout(() => rfInstance.current?.fitView({ padding: 0.2 }), 80);
+      const netSummary = netToSummary(nodes, edges);
+      const analysisSummary = summarizeAnalysis(
+        analyze(nodes, edges, initialMarking(nodes)),
+      );
+      const history = chatMessages.slice(-10);
+      const raw = await invoke<string>("generate_petri_net", {
+        prompt,
+        netSummary,
+        analysisSummary,
+        history,
+      });
+      const aiNet = extractNet(raw);
+      if (aiNet) {
+        const net = aiNetToPetriNet(aiNet);
+        scheduleCommit();
+        setNodes(net.nodes);
+        setEdges(net.edges);
+        setSelection(null);
+        const placeCount = net.nodes.filter((n) => n.type === "place").length;
+        const transitionCount = net.nodes.length - placeCount;
+        setChatMessages((m) => [
+          ...m,
+          {
+            role: "assistant",
+            content: t("aiNetResult", {
+              places: placeCount,
+              transitions: transitionCount,
+              arcs: net.edges.length,
+            }),
+          },
+        ]);
+        setTimeout(() => rfInstance.current?.fitView({ padding: 0.2 }), 80);
+      } else {
+        setChatMessages((m) => [
+          ...m,
+          { role: "assistant", content: raw.trim() },
+        ]);
+      }
     } catch (e) {
       setChatMessages((m) => [
         ...m,
@@ -529,7 +549,17 @@ function App() {
     } finally {
       setChatLoading(false);
     }
-  }, [chatInput, chatLoading, setNodes, setEdges, scheduleCommit, t]);
+  }, [
+    chatInput,
+    chatLoading,
+    chatMessages,
+    nodes,
+    edges,
+    setNodes,
+    setEdges,
+    scheduleCommit,
+    t,
+  ]);
 
   const selectedNode = selection?.kind === "node" ? nodes.find((n) => n.id === selection.id) : undefined;
   const selectedEdge = selection?.kind === "edge" ? edges.find((e) => e.id === selection.id) : undefined;

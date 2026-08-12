@@ -4,9 +4,9 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-const SYSTEM_PROMPT: &str = r#"You are a Petri net modeling assistant. Given a natural language description, produce a valid Petri net as a JSON object.
+const SYSTEM_PROMPT: &str = r#"You are a Petri net modeling assistant. You help the user build Petri nets and answer questions about them.
 
-Respond with ONLY a JSON object that matches this schema exactly:
+When the user asks to create, add, remove, or modify a Petri net, respond with ONLY a JSON object (no markdown fences, no extra text before or after) that describes the COMPLETE updated net:
 
 {
   "places": [ { "id": "p1", "label": "P1", "tokens": 0, "x": 100, "y": 100 } ],
@@ -14,7 +14,7 @@ Respond with ONLY a JSON object that matches this schema exactly:
   "arcs": [ { "from": "p1", "to": "t1", "weight": 1, "type": "normal" } ]
 }
 
-Rules:
+Rules for the net:
 - "id" must be unique strings like p1, p2, ... and t1, t2, ...
 - "label" is a short human-readable name.
 - "tokens" is a non-negative integer (initial marking).
@@ -22,13 +22,41 @@ Rules:
 - An arc connects a place to a transition or a transition to a place. Never place-to-place or transition-to-transition. "from" and "to" must reference existing ids.
 - "weight" is a positive integer (default 1).
 - "type" is one of "normal", "reset", "inhibitor".
+- When modifying an existing net, preserve the existing nodes and arcs and return the full net including unchanged parts.
 
-Do not wrap the JSON in markdown fences and do not add any text before or after it."#;
+When the user asks a question about the net (behavior, deadlock, reachability, meaning, etc.), answer in plain text. Use the provided "Analysis of current net" when relevant. Keep answers concise and factual."#;
+
+#[derive(serde::Deserialize)]
+struct ChatTurn {
+    role: String,
+    content: String,
+}
 
 #[tauri::command]
-async fn generate_petri_net(prompt: String) -> Result<String, String> {
+async fn generate_petri_net(
+    prompt: String,
+    net_summary: String,
+    analysis_summary: String,
+    history: Vec<ChatTurn>,
+) -> Result<String, String> {
     let api_key = std::env::var("DEEPSEEK_API_KEY")
         .map_err(|_| "DEEPSEEK_API_KEY not found in .env".to_string())?;
+
+    let mut messages = vec![
+        serde_json::json!({ "role": "system", "content": SYSTEM_PROMPT }),
+        serde_json::json!({
+            "role": "user",
+            "content": format!(
+                "Current Petri net:\n{net_summary}\n\nAnalysis of current net:\n{analysis_summary}"
+            )
+        }),
+    ];
+
+    for turn in history {
+        let role = if turn.role == "assistant" { "assistant" } else { "user" };
+        messages.push(serde_json::json!({ "role": role, "content": turn.content }));
+    }
+    messages.push(serde_json::json!({ "role": "user", "content": prompt }));
 
     let client = reqwest::Client::new();
     let resp = client
@@ -36,11 +64,7 @@ async fn generate_petri_net(prompt: String) -> Result<String, String> {
         .bearer_auth(&api_key)
         .json(&serde_json::json!({
             "model": "deepseek-chat",
-            "messages": [
-                { "role": "system", "content": SYSTEM_PROMPT },
-                { "role": "user", "content": prompt }
-            ],
-            "response_format": { "type": "json_object" },
+            "messages": messages,
             "temperature": 0.3
         }))
         .send()
