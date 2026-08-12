@@ -49,6 +49,15 @@ body,
   background: #e5e7eb;
 }
 
+.toolbar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar button:disabled:hover {
+  background: #fff;
+}
+
 .toolbar button.active {
   background: #2563eb;
   border-color: #2563eb;
@@ -304,7 +313,25 @@ body,
   border-radius: 4px;
   padding: 1px 5px;
   font-size: 0.75em;
-  pointer-events: none;
+  pointer-events: all;
+  cursor: pointer;
+  color: #1f2937;
+}
+
+.arc-label:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+}
+
+.arc-label-input {
+  position: absolute;
+  width: 44px;
+  border: 1px solid #2563eb;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 0.75em;
+  text-align: center;
+  background: #fff;
   color: #1f2937;
 }
 

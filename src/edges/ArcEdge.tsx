@@ -1,9 +1,19 @@
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from "@xyflow/react";
-import type { PetriEdge } from "../types";
+import { useState } from "react";
+import {
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath,
+  useReactFlow,
+  useStore,
+  type EdgeProps,
+} from "@xyflow/react";
+import type { PetriEdge, PetriNode, ArcData } from "../types";
 
 export function ArcEdge(props: EdgeProps<PetriEdge>) {
   const {
     id,
+    source,
+    target,
     sourceX,
     sourceY,
     targetX,
@@ -15,6 +25,20 @@ export function ArcEdge(props: EdgeProps<PetriEdge>) {
     selected,
   } = props;
 
+  const edges = useStore((s) => s.edges);
+  const { setEdges } = useReactFlow<PetriNode, PetriEdge>();
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const arcType = data?.arcType ?? "normal";
+  const weight = data?.weight ?? 1;
+
+  const hasReverse = edges.some(
+    (e) => e.id !== id && e.source === target && e.target === source,
+  );
+  const curvature = hasReverse ? (source < target ? 0.25 : -0.25) : 0.25;
+
   const [path, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -22,14 +46,24 @@ export function ArcEdge(props: EdgeProps<PetriEdge>) {
     targetX,
     targetY,
     targetPosition,
+    curvature,
   });
 
-  const arcType = data?.arcType ?? "normal";
-  const weight = data?.weight ?? 1;
   const markerId = `inhibitor-marker-${id}`;
-
   const finalMarkerEnd = arcType === "inhibitor" ? `url(#${markerId})` : markerEnd;
   const isDashed = arcType === "reset";
+
+  const commitWeight = () => {
+    const w = Math.max(1, Math.floor(Number(draft) || 1));
+    setEdges((eds) =>
+      eds.map((e) =>
+        e.id === id
+          ? { ...e, data: { weight: w, arcType: e.data?.arcType ?? "normal" } as ArcData }
+          : e,
+      ),
+    );
+    setEditing(false);
+  };
 
   return (
     <>
@@ -56,14 +90,39 @@ export function ArcEdge(props: EdgeProps<PetriEdge>) {
         className={selected ? "selected" : undefined}
       />
       <EdgeLabelRenderer>
-        <div
-          className="arc-label"
-          style={{
-            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-          }}
-        >
-          {weight}
-        </div>
+        {editing ? (
+          <input
+            className="arc-label-input nodrag nopan"
+            type="number"
+            min={1}
+            autoFocus
+            value={draft}
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            }}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitWeight}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitWeight();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <div
+            className="arc-label nodrag nopan"
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDraft(String(weight));
+              setEditing(true);
+            }}
+          >
+            {weight}
+          </div>
+        )}
       </EdgeLabelRenderer>
     </>
   );

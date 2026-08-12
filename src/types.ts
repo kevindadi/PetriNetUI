@@ -28,7 +28,7 @@ export type PetriNet = {
 
 let idCounter = 0;
 
-function nextId(prefix: string): string {
+export function nextId(prefix: string): string {
   idCounter += 1;
   return `${prefix}_${idCounter}`;
 }

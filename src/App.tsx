@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   ReactFlow,
   Background,
@@ -31,6 +31,7 @@ import {
   createTransition,
   createArc,
   aiNetToPetriNet,
+  nextId,
   type PetriNode,
   type PetriEdge,
   type PetriNet,
@@ -82,16 +83,136 @@ function App() {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [activePanel, setActivePanel] = useState<"chat" | "props">("chat");
+  const [selectMode, setSelectMode] = useState(false);
+  const [snapEnabled, setSnapEnabled] = useState(false);
   const rfInstance = useRef<ReactFlowInstance<PetriNode, PetriEdge> | null>(null);
 
+  const pastRef = useRef<PetriNet[]>([]);
+  const futureRef = useRef<PetriNet[]>([]);
+  const pendingCommitRef = useRef<PetriNet | null>(null);
+  const [, setHistoryVersion] = useState(0);
+  const clipboardRef = useRef<{ nodes: PetriNode[]; edges: PetriEdge[] } | null>(null);
+
+  const scheduleCommit = useCallback(() => {
+    if (pendingCommitRef.current) return;
+    pendingCommitRef.current = { nodes, edges };
+    queueMicrotask(() => {
+      const snapshot = pendingCommitRef.current;
+      if (!snapshot) return;
+      pendingCommitRef.current = null;
+      pastRef.current.push(snapshot);
+      if (pastRef.current.length > 50) pastRef.current.shift();
+      futureRef.current = [];
+      setHistoryVersion((v) => v + 1);
+    });
+  }, [nodes, edges]);
+
+  const undo = useCallback(() => {
+    const prev = pastRef.current.pop();
+    if (!prev) return;
+    futureRef.current.push({ nodes, edges });
+    setNodes(prev.nodes.map((n) => ({ ...n, selected: false })));
+    setEdges(prev.edges.map((e) => ({ ...e, selected: false })));
+    setSelection(null);
+    setHistoryVersion((v) => v + 1);
+  }, [nodes, edges, setNodes, setEdges]);
+
+  const redo = useCallback(() => {
+    const next = futureRef.current.pop();
+    if (!next) return;
+    pastRef.current.push({ nodes, edges });
+    setNodes(next.nodes.map((n) => ({ ...n, selected: false })));
+    setEdges(next.edges.map((e) => ({ ...e, selected: false })));
+    setSelection(null);
+    setHistoryVersion((v) => v + 1);
+  }, [nodes, edges, setNodes, setEdges]);
+
+  const canUndo = pastRef.current.length > 0;
+  const canRedo = futureRef.current.length > 0;
+
+  const copySelection = useCallback(() => {
+    const selNodes = nodes.filter((n) => n.selected);
+    if (selNodes.length === 0) return;
+    const selIds = new Set(selNodes.map((n) => n.id));
+    const selEdges = edges.filter((e) => selIds.has(e.source) && selIds.has(e.target));
+    clipboardRef.current = { nodes: selNodes, edges: selEdges };
+  }, [nodes, edges]);
+
+  const pasteSelection = useCallback(() => {
+    const clip = clipboardRef.current;
+    if (!clip || clip.nodes.length === 0) return;
+    scheduleCommit();
+    const idMap: Record<string, string> = {};
+    const newNodes: PetriNode[] = clip.nodes.map((n) => {
+      const newId = nextId(n.type === "place" ? "p" : "t");
+      idMap[n.id] = newId;
+      return {
+        ...n,
+        id: newId,
+        selected: false,
+        position: { x: n.position.x + 24, y: n.position.y + 24 },
+        data: structuredClone(n.data),
+      };
+    });
+    const newEdges: PetriEdge[] = clip.edges
+      .filter((e) => idMap[e.source] && idMap[e.target])
+      .map((e) => ({
+        ...e,
+        id: nextId("a"),
+        source: idMap[e.source],
+        target: idMap[e.target],
+        selected: false,
+        data: e.data ? ({ ...e.data } as ArcData) : undefined,
+      }));
+    setNodes((nds) => [...nds, ...newNodes]);
+    setEdges((eds) => [...eds, ...newEdges]);
+  }, [scheduleCommit, setNodes, setEdges]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (key === "y") {
+        e.preventDefault();
+        redo();
+      } else if (key === "c") {
+        copySelection();
+      } else if (key === "v") {
+        e.preventDefault();
+        pasteSelection();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undo, redo, copySelection, pasteSelection]);
+
   const onNodesChangeWrapped = useCallback(
-    (changes: NodeChange<PetriNode>[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
-    [setNodes],
+    (changes: NodeChange<PetriNode>[]) => {
+      if (changes.some((c) => c.type === "remove")) scheduleCommit();
+      setNodes((nds) => applyNodeChanges(changes, nds));
+    },
+    [setNodes, scheduleCommit],
   );
 
   const onEdgesChangeWrapped = useCallback(
-    (changes: EdgeChange<PetriEdge>[]) => setEdges((eds) => applyEdgeChanges(changes, eds)),
-    [setEdges],
+    (changes: EdgeChange<PetriEdge>[]) => {
+      if (changes.some((c) => c.type === "remove")) scheduleCommit();
+      setEdges((eds) => applyEdgeChanges(changes, eds));
+    },
+    [setEdges, scheduleCommit],
   );
 
   const onSelectionChange = useCallback(({ nodes: selNodes, edges: selEdges }: OnSelectionChangeParams) => {
@@ -121,6 +242,7 @@ function App() {
 
   const onConnect = useCallback(
     (conn: Connection) => {
+      scheduleCommit();
       setEdges((eds) =>
         addEdge(
           createArc(conn.source, conn.target, conn.sourceHandle, conn.targetHandle, 1, arcType),
@@ -128,7 +250,7 @@ function App() {
         ),
       );
     },
-    [arcType, setEdges],
+    [arcType, setEdges, scheduleCommit],
   );
 
   const toggleArcMode = useCallback(() => {
@@ -161,12 +283,13 @@ function App() {
         setPendingSource(null);
         return;
       }
+      scheduleCommit();
       setEdges((eds) =>
         addEdge(createArc(source.id, node.id, "out", "in", 1, arcType), eds),
       );
       setPendingSource(null);
     },
-    [arcMode, pendingSource, nodes, edges, arcType, setEdges],
+    [arcMode, pendingSource, nodes, edges, arcType, setEdges, scheduleCommit],
   );
 
   const onPaneClick = useCallback(() => {
@@ -190,18 +313,25 @@ function App() {
 
   const addPlace = useCallback(() => {
     const offset = nodes.length * 24;
+    scheduleCommit();
     setNodes((nds) => [...nds, createPlace(160 + offset, 120 + offset)]);
-  }, [nodes.length, setNodes]);
+  }, [nodes.length, setNodes, scheduleCommit]);
 
   const addTransition = useCallback(() => {
     const offset = nodes.length * 24;
+    scheduleCommit();
     setNodes((nds) => [...nds, createTransition(160 + offset, 120 + offset)]);
-  }, [nodes.length, setNodes]);
+  }, [nodes.length, setNodes, scheduleCommit]);
 
   const clearAll = useCallback(() => {
+    scheduleCommit();
     setNodes([]);
     setEdges([]);
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, scheduleCommit]);
+
+  const onNodeDragStart = useCallback(() => {
+    scheduleCommit();
+  }, [scheduleCommit]);
 
   const updateNodeData = useCallback(
     (id: string, patch: Partial<PlaceData | TransitionData>) => {
@@ -260,9 +390,10 @@ function App() {
     if (!path) return;
     const text = await readTextFile(path as string);
     const net = JSON.parse(text) as PetriNet;
+    scheduleCommit();
     setNodes(net.nodes ?? []);
     setEdges(net.edges ?? []);
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, scheduleCommit]);
 
   const sendChat = useCallback(async () => {
     const prompt = chatInput.trim();
@@ -273,6 +404,7 @@ function App() {
     try {
       const raw = await invoke<string>("generate_petri_net", { prompt });
       const net = aiNetToPetriNet(JSON.parse(raw) as AIPetriNet);
+      scheduleCommit();
       setNodes(net.nodes);
       setEdges(net.edges);
       setSelection(null);
@@ -294,7 +426,7 @@ function App() {
     } finally {
       setChatLoading(false);
     }
-  }, [chatInput, chatLoading, setNodes, setEdges]);
+  }, [chatInput, chatLoading, setNodes, setEdges, scheduleCommit]);
 
   const selectedNode = selection?.kind === "node" ? nodes.find((n) => n.id === selection.id) : undefined;
   const selectedEdge = selection?.kind === "edge" ? edges.find((e) => e.id === selection.id) : undefined;
@@ -310,6 +442,12 @@ function App() {
   return (
     <div className="app">
       <div className="toolbar">
+        <button onClick={undo} disabled={!canUndo} title="撤销 (Ctrl/Cmd+Z)">
+          Undo
+        </button>
+        <button onClick={redo} disabled={!canRedo} title="重做 (Ctrl/Cmd+Shift+Z)">
+          Redo
+        </button>
         <button onClick={addPlace}>+ Place</button>
         <button onClick={addTransition}>+ Transition</button>
         <button className={arcMode ? "active" : ""} onClick={toggleArcMode}>
@@ -341,6 +479,20 @@ function App() {
           </span>
         )}
         <span className="spacer" />
+        <button
+          className={selectMode ? "active" : ""}
+          onClick={() => setSelectMode((s) => !s)}
+          title="框选模式（开启后左键拖拽框选，中键/右键平移）"
+        >
+          Select
+        </button>
+        <button
+          className={snapEnabled ? "active" : ""}
+          onClick={() => setSnapEnabled((s) => !s)}
+          title="网格吸附"
+        >
+          Snap
+        </button>
         <button onClick={clearAll}>Clear</button>
         <button onClick={handleOpen}>Open</button>
         <button onClick={handleSave}>Save</button>
@@ -357,12 +509,17 @@ function App() {
             onSelectionChange={onSelectionChange}
             onNodeClick={onNodeClick}
             onPaneClick={onPaneClick}
+            onNodeDragStart={onNodeDragStart}
             isValidConnection={isValidConnection}
             onNodesDelete={onNodesDelete}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             defaultEdgeOptions={defaultEdgeOptions}
             deleteKeyCode={["Backspace", "Delete"]}
+            selectionOnDrag={selectMode}
+            panOnDrag={selectMode ? [1, 2] : true}
+            snapToGrid={snapEnabled}
+            snapGrid={[16, 16]}
             fitView
             onInit={(inst) => {
               rfInstance.current = inst;
@@ -443,6 +600,7 @@ function App() {
                     Name
                     <input
                       value={placeNode.data.label}
+                      onFocus={scheduleCommit}
                       onChange={(e) => updateNodeData(placeNode.id, { label: e.target.value })}
                     />
                   </label>
@@ -452,6 +610,7 @@ function App() {
                       type="number"
                       min={0}
                       value={placeNode.data.tokens}
+                      onFocus={scheduleCommit}
                       onChange={(e) =>
                         updateNodeData(placeNode.id, {
                           tokens: Math.max(0, Number(e.target.value)),
@@ -467,6 +626,7 @@ function App() {
                     Name
                     <input
                       value={transitionNode.data.label}
+                      onFocus={scheduleCommit}
                       onChange={(e) => updateNodeData(transitionNode.id, { label: e.target.value })}
                     />
                   </label>
@@ -480,6 +640,7 @@ function App() {
                       type="number"
                       min={1}
                       value={selectedEdge.data?.weight ?? 1}
+                      onFocus={scheduleCommit}
                       onChange={(e) =>
                         updateEdgeWeight(selectedEdge.id, Math.max(1, Number(e.target.value)))
                       }
@@ -489,6 +650,7 @@ function App() {
                     Type
                     <select
                       value={selectedEdge.data?.arcType ?? "normal"}
+                      onFocus={scheduleCommit}
                       onChange={(e) =>
                         updateEdgeType(selectedEdge.id, e.target.value as ArcType)
                       }
