@@ -43,6 +43,15 @@ import {
   type ArcData,
   type NetKind,
   type CapacityMode,
+  type CvnPlace,
+  type ControlSub,
+  type ResourceType,
+  type TransitionKind,
+  type CvnArcKind,
+  type TimeInterval,
+  TRANSITION_KINDS,
+  CONTROL_SUBS,
+  RESOURCE_TYPES,
 } from "./types";
 import { makeTranslator, languages, type Language } from "./i18n";
 import {
@@ -62,6 +71,39 @@ const defaultEdgeOptions = {
   type: "arc",
   markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "#1f2937" },
 };
+
+function stripNetAttrs(
+  nk: NetKind,
+  data: PlaceData | TransitionData,
+): PlaceData | TransitionData {
+  if (data.kind === "place") {
+    const base: PlaceData = { kind: "place", label: data.label, tokens: data.tokens };
+    if (nk === "pt" || nk === "timed") {
+      base.capacity = data.capacity ?? null;
+      if (nk === "pt") base.capacityMode = data.capacityMode ?? "reject";
+      if (nk === "timed") base.saturate = data.saturate ?? false;
+    } else {
+      base.cvnPlace = data.cvnPlace ?? { class: "control", sub: "Statement" };
+    }
+    return base;
+  }
+  const base: TransitionData = { kind: "transition", label: data.label };
+  if (nk === "pt" || nk === "timed") {
+    base.priority = data.priority ?? null;
+    if (nk === "timed") {
+      base.interval =
+        data.interval ?? { earliest: 0, latest: null, leftOpen: false, rightOpen: false };
+      base.core = data.core ?? 0;
+      base.suspendable = data.suspendable ?? false;
+    }
+  } else {
+    base.cvnKind = data.cvnKind ?? "Sequential";
+    base.scope = data.scope ?? null;
+    base.anchors = data.anchors ?? "";
+    base.family = data.family ?? null;
+  }
+  return base;
+}
 
 type Selection =
   | { kind: "node"; id: string }
@@ -433,6 +475,29 @@ function App() {
     setEdges([]);
   }, [setNodes, setEdges, scheduleCommit]);
 
+  const changeNetKind = useCallback(
+    (next: NetKind) => {
+      if (next === netKind) return;
+      scheduleCommit();
+      setNetKind(next);
+      setNodes((nds) => nds.map((n) => ({ ...n, data: stripNetAttrs(next, n.data) })));
+      setEdges((eds) =>
+        eds.map((e) => {
+          const base = {
+            weight: e.data?.weight ?? 1,
+            arcType: e.data?.arcType ?? "normal",
+          };
+          return next === "cvn"
+            ? { ...e, data: { ...base, cvnArc: e.data?.cvnArc ?? { type: "plain" } } }
+            : { ...e, data: base };
+        }),
+      );
+      setSimulating(false);
+      setAnalysis(null);
+    },
+    [netKind, scheduleCommit, setNodes, setEdges],
+  );
+
   const onNodeDragStart = useCallback(() => {
     scheduleCommit();
   }, [scheduleCommit]);
@@ -469,6 +534,26 @@ function App() {
         eds.map((e) =>
           e.id === id
             ? { ...e, data: { weight: e.data?.weight ?? 1, arcType } as ArcData }
+            : e,
+        ),
+      );
+    },
+    [setEdges],
+  );
+
+  const updateEdgeCvn = useCallback(
+    (id: string, cvnArc: CvnArcKind) => {
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === id
+            ? {
+                ...e,
+                data: {
+                  weight: e.data?.weight ?? 1,
+                  arcType: e.data?.arcType ?? "normal",
+                  cvnArc,
+                } as ArcData,
+              }
             : e,
         ),
       );
@@ -575,6 +660,17 @@ function App() {
       ? (selectedNode as Node<TransitionData, "transition">)
       : undefined;
 
+  const placeCvn: CvnPlace =
+    placeNode?.data.cvnPlace ?? { class: "control", sub: "Statement" };
+  const transInterval: TimeInterval =
+    transitionNode?.data.interval ?? {
+      earliest: 0,
+      latest: null,
+      leftOpen: false,
+      rightOpen: false,
+    };
+  const edgeCvn: CvnArcKind = selectedEdge?.data?.cvnArc ?? { type: "plain" };
+
   return (
     <div className="app">
       <div className="toolbar">
@@ -635,16 +731,12 @@ function App() {
         <select
           className="lang-select"
           value={netKind}
-          onChange={(e) => setNetKind(e.target.value as NetKind)}
+          onChange={(e) => changeNetKind(e.target.value as NetKind)}
           title={t("netType")}
         >
           <option value="pt">{t("netTypePt")}</option>
-          <option value="timed" disabled>
-            {t("netTypeTimed")}
-          </option>
-          <option value="cvn" disabled>
-            {t("netTypeCvn")}
-          </option>
+          <option value="timed">{t("netTypeTimed")}</option>
+          <option value="cvn">{t("netTypeCvn")}</option>
         </select>
         <select
           className="lang-select"
@@ -858,39 +950,148 @@ function App() {
                       }
                     />
                   </label>
-                  <label>
-                    {t("capacity")}
-                    <input
-                      type="number"
-                      min={0}
-                      value={placeNode.data.capacity ?? ""}
-                      placeholder={t("unbounded")}
-                      onFocus={scheduleCommit}
-                      onChange={(e) =>
-                        updateNodeData(placeNode.id, {
-                          capacity:
-                            e.target.value === ""
-                              ? null
-                              : Math.max(0, Number(e.target.value)),
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    {t("capacityMode")}
-                    <select
-                      value={placeNode.data.capacityMode ?? "reject"}
-                      onFocus={scheduleCommit}
-                      onChange={(e) =>
-                        updateNodeData(placeNode.id, {
-                          capacityMode: e.target.value as CapacityMode,
-                        })
-                      }
-                    >
-                      <option value="reject">{t("capacityReject")}</option>
-                      <option value="saturate">{t("capacitySaturate")}</option>
-                    </select>
-                  </label>
+                  {(netKind === "pt" || netKind === "timed") && (
+                    <label>
+                      {t("capacity")}
+                      <input
+                        type="number"
+                        min={0}
+                        value={placeNode.data.capacity ?? ""}
+                        placeholder={t("unbounded")}
+                        onFocus={scheduleCommit}
+                        onChange={(e) =>
+                          updateNodeData(placeNode.id, {
+                            capacity:
+                              e.target.value === ""
+                                ? null
+                                : Math.max(0, Number(e.target.value)),
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+                  {netKind === "pt" && (
+                    <label>
+                      {t("capacityMode")}
+                      <select
+                        value={placeNode.data.capacityMode ?? "reject"}
+                        onFocus={scheduleCommit}
+                        onChange={(e) =>
+                          updateNodeData(placeNode.id, {
+                            capacityMode: e.target.value as CapacityMode,
+                          })
+                        }
+                      >
+                        <option value="reject">{t("capacityReject")}</option>
+                        <option value="saturate">{t("capacitySaturate")}</option>
+                      </select>
+                    </label>
+                  )}
+                  {netKind === "timed" && (
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={placeNode.data.saturate ?? false}
+                        onFocus={scheduleCommit}
+                        onChange={(e) =>
+                          updateNodeData(placeNode.id, { saturate: e.target.checked })
+                        }
+                      />
+                      {t("saturate")}
+                    </label>
+                  )}
+                  {netKind === "cvn" && (
+                    <>
+                      <label>
+                        {t("placeClass")}
+                        <select
+                          value={placeCvn.class}
+                          onFocus={scheduleCommit}
+                          onChange={(e) => {
+                            const cls = e.target.value as "control" | "resource";
+                            updateNodeData(placeNode.id, {
+                              cvnPlace:
+                                cls === "control"
+                                  ? { class: "control", sub: "Statement" }
+                                  : { class: "resource", resource: "Mutex", param: 1 },
+                            });
+                          }}
+                        >
+                          <option value="control">{t("controlFlow")}</option>
+                          <option value="resource">{t("resource")}</option>
+                        </select>
+                      </label>
+                      {placeCvn.class === "control" ? (
+                        <label>
+                          {t("controlSub")}
+                          <select
+                            value={placeCvn.sub}
+                            onFocus={scheduleCommit}
+                            onChange={(e) =>
+                              updateNodeData(placeNode.id, {
+                                cvnPlace: {
+                                  class: "control",
+                                  sub: e.target.value as ControlSub,
+                                },
+                              })
+                            }
+                          >
+                            {CONTROL_SUBS.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
+                        <>
+                          <label>
+                            {t("resourceType")}
+                            <select
+                              value={placeCvn.resource}
+                              onFocus={scheduleCommit}
+                              onChange={(e) =>
+                                updateNodeData(placeNode.id, {
+                                  cvnPlace: {
+                                    class: "resource",
+                                    resource: e.target.value as ResourceType,
+                                    param: 1,
+                                  },
+                                })
+                              }
+                            >
+                              {RESOURCE_TYPES.map((r) => (
+                                <option key={r} value={r}>
+                                  {r}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          {(placeCvn.resource === "RwLock" ||
+                            placeCvn.resource === "Semaphore") && (
+                            <label>
+                              {t("resourceParam")}
+                              <input
+                                type="number"
+                                min={1}
+                                value={placeCvn.param ?? 1}
+                                onFocus={scheduleCommit}
+                                onChange={(e) =>
+                                  updateNodeData(placeNode.id, {
+                                    cvnPlace: {
+                                      class: "resource",
+                                      resource: placeCvn.resource,
+                                      param: Math.max(1, Number(e.target.value)),
+                                    },
+                                  })
+                                }
+                              />
+                            </label>
+                          )}
+                        </>
+                      )}
+                    </>
+                  )}
                 </form>
               )}
               {transitionNode && (
@@ -903,21 +1104,172 @@ function App() {
                       onChange={(e) => updateNodeData(transitionNode.id, { label: e.target.value })}
                     />
                   </label>
-                  <label>
-                    {t("priority")}
-                    <input
-                      type="number"
-                      value={transitionNode.data.priority ?? ""}
-                      placeholder="—"
-                      onFocus={scheduleCommit}
-                      onChange={(e) =>
-                        updateNodeData(transitionNode.id, {
-                          priority:
-                            e.target.value === "" ? null : Number(e.target.value),
-                        })
-                      }
-                    />
-                  </label>
+                  {(netKind === "pt" || netKind === "timed") && (
+                    <label>
+                      {t("priority")}
+                      <input
+                        type="number"
+                        value={transitionNode.data.priority ?? ""}
+                        placeholder="—"
+                        onFocus={scheduleCommit}
+                        onChange={(e) =>
+                          updateNodeData(transitionNode.id, {
+                            priority:
+                              e.target.value === "" ? null : Number(e.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+                  {netKind === "timed" && (
+                    <>
+                      <fieldset className="props-fieldset">
+                        <legend>{t("timeInterval")}</legend>
+                        <label>
+                          {t("earliest")}
+                          <input
+                            type="number"
+                            min={0}
+                            value={transInterval.earliest}
+                            onFocus={scheduleCommit}
+                            onChange={(e) =>
+                              updateNodeData(transitionNode.id, {
+                                interval: {
+                                  ...transInterval,
+                                  earliest: Math.max(0, Number(e.target.value)),
+                                },
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          {t("latest")}
+                          <input
+                            type="number"
+                            min={0}
+                            value={transInterval.latest ?? ""}
+                            placeholder="∞"
+                            onFocus={scheduleCommit}
+                            onChange={(e) =>
+                              updateNodeData(transitionNode.id, {
+                                interval: {
+                                  ...transInterval,
+                                  latest:
+                                    e.target.value === "" ? null : Number(e.target.value),
+                                },
+                              })
+                            }
+                          />
+                        </label>
+                        <label className="checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={transInterval.leftOpen}
+                            onFocus={scheduleCommit}
+                            onChange={(e) =>
+                              updateNodeData(transitionNode.id, {
+                                interval: { ...transInterval, leftOpen: e.target.checked },
+                              })
+                            }
+                          />
+                          {t("leftOpen")}
+                        </label>
+                        <label className="checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={transInterval.rightOpen}
+                            onFocus={scheduleCommit}
+                            onChange={(e) =>
+                              updateNodeData(transitionNode.id, {
+                                interval: { ...transInterval, rightOpen: e.target.checked },
+                              })
+                            }
+                          />
+                          {t("rightOpen")}
+                        </label>
+                      </fieldset>
+                      <label>
+                        {t("core")}
+                        <input
+                          type="number"
+                          value={transitionNode.data.core ?? 0}
+                          onFocus={scheduleCommit}
+                          onChange={(e) =>
+                            updateNodeData(transitionNode.id, { core: Number(e.target.value) })
+                          }
+                        />
+                      </label>
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={transitionNode.data.suspendable ?? false}
+                          onFocus={scheduleCommit}
+                          onChange={(e) =>
+                            updateNodeData(transitionNode.id, {
+                              suspendable: e.target.checked,
+                            })
+                          }
+                        />
+                        {t("suspendable")}
+                      </label>
+                    </>
+                  )}
+                  {netKind === "cvn" && (
+                    <>
+                      <label>
+                        {t("transitionKind")}
+                        <select
+                          value={transitionNode.data.cvnKind ?? "Sequential"}
+                          onFocus={scheduleCommit}
+                          onChange={(e) =>
+                            updateNodeData(transitionNode.id, {
+                              cvnKind: e.target.value as TransitionKind,
+                            })
+                          }
+                        >
+                          {TRANSITION_KINDS.map((k) => (
+                            <option key={k} value={k}>
+                              {k}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        {t("scope")}
+                        <input
+                          value={transitionNode.data.scope ?? ""}
+                          onFocus={scheduleCommit}
+                          onChange={(e) =>
+                            updateNodeData(transitionNode.id, {
+                              scope: e.target.value === "" ? null : e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        {t("family")}
+                        <input
+                          value={transitionNode.data.family ?? ""}
+                          onFocus={scheduleCommit}
+                          onChange={(e) =>
+                            updateNodeData(transitionNode.id, {
+                              family: e.target.value === "" ? null : e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        {t("anchors")}
+                        <input
+                          value={transitionNode.data.anchors ?? ""}
+                          onFocus={scheduleCommit}
+                          onChange={(e) =>
+                            updateNodeData(transitionNode.id, { anchors: e.target.value })
+                          }
+                        />
+                      </label>
+                    </>
+                  )}
                 </form>
               )}
               {selectedEdge && (
@@ -948,6 +1300,62 @@ function App() {
                       <option value="inhibitor">{t("arcInhibit")}</option>
                     </select>
                   </label>
+                  {netKind === "cvn" && (
+                    <>
+                      <label>
+                        {t("arcKind")}
+                        <select
+                          value={edgeCvn.type}
+                          onFocus={scheduleCommit}
+                          onChange={(e) => {
+                            const ty = e.target.value as "plain" | "guard" | "update";
+                            updateEdgeCvn(
+                              selectedEdge.id,
+                              ty === "plain"
+                                ? { type: "plain" }
+                                : ty === "guard"
+                                  ? { type: "guard", guard: "" }
+                                  : { type: "update", update: "" },
+                            );
+                          }}
+                        >
+                          <option value="plain">{t("plain")}</option>
+                          <option value="guard">{t("guard")}</option>
+                          <option value="update">{t("update")}</option>
+                        </select>
+                      </label>
+                      {edgeCvn.type === "guard" && (
+                        <label>
+                          {t("guard")}
+                          <input
+                            value={edgeCvn.guard}
+                            onFocus={scheduleCommit}
+                            onChange={(e) =>
+                              updateEdgeCvn(selectedEdge.id, {
+                                type: "guard",
+                                guard: e.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      )}
+                      {edgeCvn.type === "update" && (
+                        <label>
+                          {t("update")}
+                          <input
+                            value={edgeCvn.update}
+                            onFocus={scheduleCommit}
+                            onChange={(e) =>
+                              updateEdgeCvn(selectedEdge.id, {
+                                type: "update",
+                                update: e.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      )}
+                    </>
+                  )}
                 </form>
               )}
             </div>

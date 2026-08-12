@@ -4,18 +4,102 @@ export type NetKind = "pt" | "timed" | "cvn";
 
 export type CapacityMode = "reject" | "saturate";
 
+export type TimeInterval = {
+  earliest: number;
+  latest: number | null;
+  leftOpen: boolean;
+  rightOpen: boolean;
+};
+
+export type ControlSub =
+  | "Statement"
+  | "BasicBlock"
+  | "FunctionStart"
+  | "FunctionEnd"
+  | "Return"
+  | "ThreadEnd"
+  | "CallWait"
+  | "WaitPoint"
+  | "Reacquire"
+  | "SpawnBridge"
+  | "TestPoint";
+
+export type ResourceType = "Mutex" | "RwLock" | "Semaphore" | "Channel" | "Condvar";
+
+export type CvnPlace =
+  | { class: "control"; sub: ControlSub }
+  | { class: "resource"; resource: ResourceType; param?: number };
+
+export type TransitionKind =
+  | "Sequential"
+  | "Goto"
+  | "FunctionEnter"
+  | "FunctionExit"
+  | "Return"
+  | "Drop"
+  | "BranchTrue"
+  | "BranchFalse"
+  | "Switch"
+  | "Lock"
+  | "Unlock"
+  | "ReadLock"
+  | "ReadUnlock"
+  | "Acquire"
+  | "Release"
+  | "Send"
+  | "Recv"
+  | "VarRead"
+  | "VarWrite"
+  | "AtomicLoad"
+  | "AtomicStore"
+  | "AtomicCmpXchg"
+  | "CasSuccess"
+  | "CasFailure"
+  | "UnsafeRead"
+  | "UnsafeWrite"
+  | "UnsafeAccess"
+  | "Spawn"
+  | "Join"
+  | "Call"
+  | "CondvarWaitEnter"
+  | "CondvarWakeByNotify"
+  | "CondvarWakeByNotifyAll"
+  | "CondvarReacquire"
+  | "CondvarNotify"
+  | "CondvarNotifyLost"
+  | "CondvarNotifyAll"
+  | "CondvarNotifyAllLost"
+  | "TestBarrier"
+  | "TestInject"
+  | "TestPoint"
+  | "Other";
+
+export type CvnArcKind =
+  | { type: "plain" }
+  | { type: "guard"; guard: string }
+  | { type: "update"; update: string };
+
 export type PlaceData = {
   kind: "place";
   label: string;
   tokens: number;
   capacity?: number | null;
   capacityMode?: CapacityMode;
+  saturate?: boolean;
+  cvnPlace?: CvnPlace;
 };
 
 export type TransitionData = {
   kind: "transition";
   label: string;
   priority?: number | null;
+  interval?: TimeInterval;
+  core?: number;
+  suspendable?: boolean;
+  cvnKind?: TransitionKind;
+  scope?: string | null;
+  anchors?: string;
+  family?: string | null;
 };
 
 export type ArcType = "normal" | "reset" | "inhibitor";
@@ -23,7 +107,28 @@ export type ArcType = "normal" | "reset" | "inhibitor";
 export type ArcData = {
   weight: number;
   arcType: ArcType;
+  cvnArc?: CvnArcKind;
 };
+
+export const TRANSITION_KINDS: TransitionKind[] = [
+  "Sequential", "Goto", "FunctionEnter", "FunctionExit", "Return", "Drop",
+  "BranchTrue", "BranchFalse", "Switch", "Lock", "Unlock", "ReadLock",
+  "ReadUnlock", "Acquire", "Release", "Send", "Recv", "VarRead", "VarWrite",
+  "AtomicLoad", "AtomicStore", "AtomicCmpXchg", "CasSuccess", "CasFailure",
+  "UnsafeRead", "UnsafeWrite", "UnsafeAccess", "Spawn", "Join", "Call",
+  "CondvarWaitEnter", "CondvarWakeByNotify", "CondvarWakeByNotifyAll",
+  "CondvarReacquire", "CondvarNotify", "CondvarNotifyLost", "CondvarNotifyAll",
+  "CondvarNotifyAllLost", "TestBarrier", "TestInject", "TestPoint", "Other",
+];
+
+export const CONTROL_SUBS: ControlSub[] = [
+  "Statement", "BasicBlock", "FunctionStart", "FunctionEnd", "Return",
+  "ThreadEnd", "CallWait", "WaitPoint", "Reacquire", "SpawnBridge", "TestPoint",
+];
+
+export const RESOURCE_TYPES: ResourceType[] = [
+  "Mutex", "RwLock", "Semaphore", "Channel", "Condvar",
+];
 
 export type PetriNode = Node<PlaceData | TransitionData, "place" | "transition">;
 export type PetriEdge = Edge<ArcData, "arc">;
