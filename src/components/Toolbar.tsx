@@ -16,9 +16,9 @@ type ToolbarProps = {
   onAddTransition: () => void;
   onToggleArcMode: () => void;
   onArcType: (type: ArcType) => void;
+  canDelete: boolean;
+  onDelete: () => void;
   onClear: () => void;
-  onOpen: () => void;
-  onSave: () => void;
   onNetKind: (kind: NetKind) => void;
   onLang: (lang: Language) => void;
 };
@@ -38,9 +38,9 @@ export function Toolbar({
   onAddTransition,
   onToggleArcMode,
   onArcType,
+  canDelete,
+  onDelete,
   onClear,
-  onOpen,
-  onSave,
   onNetKind,
   onLang,
 }: ToolbarProps) {
@@ -83,9 +83,10 @@ export function Toolbar({
         </span>
       )}
       <span className="spacer" />
+      <button onClick={onDelete} disabled={!canDelete} title={t("deleteTitle")}>
+        {t("delete")}
+      </button>
       <button onClick={onClear}>{t("clear")}</button>
-      <button onClick={onOpen}>{t("open")}</button>
-      <button onClick={onSave}>{t("save")}</button>
       <select
         className="lang-select"
         value={netKind}

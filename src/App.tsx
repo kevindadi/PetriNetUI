@@ -404,7 +404,23 @@ function App() {
     scheduleCommit();
     setNodes([]);
     setEdges([]);
+    setSelection(null);
   }, [setNodes, setEdges, scheduleCommit]);
+
+  const hasSelection = nodes.some((n) => n.selected) || edges.some((e) => e.selected);
+
+  const deleteSelected = useCallback(() => {
+    const selectedNodes = nodes.filter((n) => n.selected);
+    const selectedEdges = edges.filter((e) => e.selected);
+    if (selectedNodes.length === 0 && selectedEdges.length === 0) return;
+    scheduleCommit();
+    const nodeIds = new Set(selectedNodes.map((n) => n.id));
+    setNodes((nds) => nds.filter((n) => !n.selected));
+    setEdges((eds) =>
+      eds.filter((e) => !e.selected && !nodeIds.has(e.source) && !nodeIds.has(e.target)),
+    );
+    setSelection(null);
+  }, [nodes, edges, scheduleCommit, setNodes, setEdges]);
 
   const changeNetKind = useCallback(
     (next: NetKind) => {
@@ -556,6 +572,8 @@ function App() {
         { type: "separator" },
         { type: "action", label: t("menuCopy"), onClick: copySelection },
         { type: "action", label: t("menuPaste"), onClick: pasteSelection },
+        { type: "separator" },
+        { type: "action", label: t("menuDelete"), disabled: !hasSelection, onClick: deleteSelected },
       ],
     },
     {
@@ -601,9 +619,9 @@ function App() {
           setPendingSource(null);
         }}
         onArcType={setArcType}
+        canDelete={hasSelection}
+        onDelete={deleteSelected}
         onClear={clearAll}
-        onOpen={handleOpen}
-        onSave={handleSave}
         onNetKind={changeNetKind}
         onLang={(next) => {
           setLang(next);
