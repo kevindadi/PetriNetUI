@@ -7,7 +7,7 @@ import {
   useStore,
   type EdgeProps,
 } from "@xyflow/react";
-import type { PetriEdge, PetriNode, ArcData } from "../types";
+import { patchArcData, type PetriEdge, type PetriNode } from "../types";
 
 export function ArcEdge(props: EdgeProps<PetriEdge>) {
   const {
@@ -56,14 +56,21 @@ export function ArcEdge(props: EdgeProps<PetriEdge>) {
   const commitWeight = () => {
     const w = Math.max(1, Math.floor(Number(draft) || 1));
     setEdges((eds) =>
-      eds.map((e) =>
-        e.id === id
-          ? { ...e, data: { weight: w, arcType: e.data?.arcType ?? "normal" } as ArcData }
-          : e,
-      ),
+      eds.map((e) => (e.id === id ? { ...e, data: patchArcData(e.data, { weight: w }) } : e)),
     );
     setEditing(false);
   };
+
+  const extra =
+    data?.cvnArc?.type === "guard"
+      ? data.cvnArc.guard
+        ? `[${data.cvnArc.guard}]`
+        : "[g]"
+      : data?.cvnArc?.type === "update"
+        ? data.cvnArc.update
+          ? `{${data.cvnArc.update}}`
+          : "{u}"
+        : "";
 
   return (
     <>
@@ -121,6 +128,7 @@ export function ArcEdge(props: EdgeProps<PetriEdge>) {
             }}
           >
             {weight}
+            {extra ? ` ${extra}` : ""}
           </div>
         )}
       </EdgeLabelRenderer>

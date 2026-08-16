@@ -4,15 +4,10 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-const SYSTEM_PROMPT: &str = r#"You are a Petri net modeling assistant. You help the user build Petri nets and answer questions about them.
+fn system_prompt(net_kind: &str) -> String {
+    let common = r#"You are a Petri net modeling assistant. You help the user build Petri nets and answer questions about them.
 
-When the user asks to create, add, remove, or modify a Petri net, respond with ONLY a JSON object (no markdown fences, no extra text before or after) that describes the COMPLETE updated net:
-
-{
-  "places": [ { "id": "p1", "label": "P1", "tokens": 0, "x": 100, "y": 100 } ],
-  "transitions": [ { "id": "t1", "label": "T1", "x": 300, "y": 100 } ],
-  "arcs": [ { "from": "p1", "to": "t1", "weight": 1, "type": "normal" } ]
-}
+When the user asks to create, add, remove, or modify a Petri net, respond with ONLY a JSON object (no markdown fences, no extra text before or after) that describes the COMPLETE updated net.
 
 Rules for the net:
 - "id" must be unique strings like p1, p2, ... and t1, t2, ...
@@ -26,6 +21,39 @@ Rules for the net:
 
 When the user asks a question about the net (behavior, deadlock, reachability, meaning, etc.), answer in plain text. Use the provided "Analysis of current net" when relevant. Keep answers concise and factual."#;
 
+    let extra = match net_kind {
+        "timed" => r#"
+Current net kind: timed.
+JSON shape:
+{
+  "places": [ { "id": "p1", "label": "P1", "tokens": 0, "x": 100, "y": 100, "capacity": 3, "saturate": false } ],
+  "transitions": [ { "id": "t1", "label": "T1", "x": 300, "y": 100, "priority": 0, "interval": { "earliest": 0, "latest": 5, "leftOpen": false, "rightOpen": false }, "core": 0, "suspendable": false } ],
+  "arcs": [ { "from": "p1", "to": "t1", "weight": 1, "type": "normal" } ]
+}
+Use null for unbounded latest / capacity."#,
+        "cvn" => r#"
+Current net kind: cvn (colored verification net).
+JSON shape:
+{
+  "places": [ { "id": "p1", "label": "ready", "tokens": 1, "x": 100, "y": 100, "cvnPlace": { "class": "control", "sub": "Statement" } } ],
+  "transitions": [ { "id": "t1", "label": "lock", "x": 300, "y": 100, "cvnKind": "Lock", "scope": null, "anchors": "", "family": null } ],
+  "arcs": [ { "from": "p1", "to": "t1", "weight": 1, "type": "normal", "cvnArc": { "type": "guard", "guard": "x == 0" } } ]
+}
+cvnPlace.class is "control" (with sub) or "resource" (with resource and optional param).
+cvnArc.type is "plain", "guard" (input arcs, e.g. "x >= 1") or "update" (output arcs, e.g. "x = x + 1")."#,
+        _ => r#"
+Current net kind: pt.
+JSON shape:
+{
+  "places": [ { "id": "p1", "label": "P1", "tokens": 0, "x": 100, "y": 100, "capacity": null, "capacityMode": "reject" } ],
+  "transitions": [ { "id": "t1", "label": "T1", "x": 300, "y": 100, "priority": null } ],
+  "arcs": [ { "from": "p1", "to": "t1", "weight": 1, "type": "normal" } ]
+}"#,
+    };
+
+    format!("{common}\n{extra}")
+}
+
 #[derive(serde::Deserialize)]
 struct ChatTurn {
     role: String,
@@ -38,12 +66,13 @@ async fn generate_petri_net(
     net_summary: String,
     analysis_summary: String,
     history: Vec<ChatTurn>,
+    net_kind: Option<String>,
 ) -> Result<String, String> {
     let api_key = std::env::var("DEEPSEEK_API_KEY")
         .map_err(|_| "DEEPSEEK_API_KEY not found in .env".to_string())?;
 
     let mut messages = vec![
-        serde_json::json!({ "role": "system", "content": SYSTEM_PROMPT }),
+        serde_json::json!({ "role": "system", "content": system_prompt(net_kind.as_deref().unwrap_or("pt")) }),
         serde_json::json!({
             "role": "user",
             "content": format!(

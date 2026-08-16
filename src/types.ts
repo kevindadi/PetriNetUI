@@ -210,6 +210,7 @@ export function createArc(
   targetHandle: string | null,
   weight = 1,
   arcType: ArcType = "normal",
+  cvnArc?: CvnArcKind,
 ): PetriEdge {
   return {
     id: nextId("a"),
@@ -218,9 +219,51 @@ export function createArc(
     target,
     sourceHandle: sourceHandle ?? undefined,
     targetHandle: targetHandle ?? undefined,
-    data: { weight, arcType },
+    data: patchArcData(undefined, { weight, arcType, cvnArc }),
   };
 }
+
+export function patchArcData(
+  data: ArcData | undefined,
+  patch: Partial<ArcData>,
+): ArcData {
+  const next: ArcData = {
+    weight: patch.weight ?? data?.weight ?? 1,
+    arcType: patch.arcType ?? data?.arcType ?? "normal",
+  };
+  const cvnArc = patch.cvnArc !== undefined ? patch.cvnArc : data?.cvnArc;
+  if (cvnArc) next.cvnArc = cvnArc;
+  return next;
+}
+
+export function defaultInterval(): TimeInterval {
+  return { earliest: 0, latest: null, leftOpen: false, rightOpen: false };
+}
+
+export function formatTimeInterval(interval: TimeInterval): string {
+  const left = interval.leftOpen ? "(" : "[";
+  const right = interval.rightOpen ? ")" : "]";
+  const latest = interval.latest == null ? "∞" : String(interval.latest);
+  return `${left}${interval.earliest}, ${latest}${right}`;
+}
+
+export function resourceCapacity(place: CvnPlace | undefined): number | null {
+  if (!place || place.class !== "resource") return null;
+  if (place.resource === "Mutex") return 1;
+  if (place.resource === "RwLock" || place.resource === "Semaphore") {
+    return place.param ?? 1;
+  }
+  return null;
+}
+
+export type Selection =
+  | { kind: "node"; id: string }
+  | { kind: "edge"; id: string }
+  | null;
+
+export type ChatMessage = { role: "user" | "assistant"; content: string };
+
+export type ActivePanel = "chat" | "props" | "simulation";
 
 export type AIPlace = {
   id?: string;
@@ -228,6 +271,10 @@ export type AIPlace = {
   tokens?: number;
   x?: number;
   y?: number;
+  capacity?: number | null;
+  capacityMode?: CapacityMode;
+  saturate?: boolean;
+  cvnPlace?: CvnPlace;
 };
 
 export type AITransition = {
@@ -235,6 +282,14 @@ export type AITransition = {
   label?: string;
   x?: number;
   y?: number;
+  priority?: number | null;
+  interval?: TimeInterval;
+  core?: number;
+  suspendable?: boolean;
+  cvnKind?: TransitionKind;
+  scope?: string | null;
+  anchors?: string;
+  family?: string | null;
 };
 
 export type AIArc = {
@@ -242,6 +297,7 @@ export type AIArc = {
   to?: string;
   weight?: number;
   type?: ArcType;
+  cvnArc?: CvnArcKind;
 };
 
 export type AIPetriNet = {
@@ -266,20 +322,32 @@ export function aiNetToPetriNet(net: AIPetriNet, nk: NetKind = "pt"): PetriNet {
         kind: "place",
         label: p.label ?? nodeId,
         tokens: Math.max(0, Math.floor(p.tokens ?? 0)),
+        capacity: p.capacity,
+        capacityMode: p.capacityMode,
+        saturate: p.saturate,
+        cvnPlace: p.cvnPlace,
       }) as PlaceData,
     });
   }
 
-  for (const t of net.transitions ?? []) {
-    const nodeId = t.id && t.id.length > 0 ? t.id : nextId("t");
-    idMap[t.id ?? nodeId] = nodeId;
+  for (const tr of net.transitions ?? []) {
+    const nodeId = tr.id && tr.id.length > 0 ? tr.id : nextId("t");
+    idMap[tr.id ?? nodeId] = nodeId;
     nodes.push({
       id: nodeId,
       type: "transition",
-      position: { x: t.x ?? 100, y: t.y ?? 100 },
+      position: { x: tr.x ?? 100, y: tr.y ?? 100 },
       data: stripNetAttrs(nk, {
         kind: "transition",
-        label: t.label ?? nodeId,
+        label: tr.label ?? nodeId,
+        priority: tr.priority,
+        interval: tr.interval,
+        core: tr.core,
+        suspendable: tr.suspendable,
+        cvnKind: tr.cvnKind,
+        scope: tr.scope,
+        anchors: tr.anchors,
+        family: tr.family,
       }) as TransitionData,
     });
   }
@@ -299,6 +367,7 @@ export function aiNetToPetriNet(net: AIPetriNet, nk: NetKind = "pt"): PetriNet {
         "in",
         Math.max(1, Math.floor(a.weight ?? 1)),
         a.type ?? "normal",
+        nk === "cvn" ? (a.cvnArc ?? { type: "plain" }) : undefined,
       ),
     );
   }
@@ -306,23 +375,57 @@ export function aiNetToPetriNet(net: AIPetriNet, nk: NetKind = "pt"): PetriNet {
   return { netKind: nk, nodes, edges };
 }
 
-export function netToSummary(nodes: PetriNode[], edges: PetriEdge[]): string {
-  const lines: string[] = [];
+export function netToSummary(
+  nodes: PetriNode[],
+  edges: PetriEdge[],
+  netKind: NetKind = "pt",
+): string {
+  const lines: string[] = [`netKind=${netKind}`];
   for (const n of nodes) {
     if (n.type === "place") {
       const d = n.data as PlaceData;
-      const cap = d.capacity == null ? "" : ` capacity=${d.capacity}`;
-      lines.push(`Place ${n.id} label="${d.label}" tokens=${d.tokens}${cap}`);
+      const parts = [`Place ${n.id} label="${d.label}" tokens=${d.tokens}`];
+      if (netKind === "pt" || netKind === "timed") {
+        if (d.capacity != null) parts.push(`capacity=${d.capacity}`);
+        if (netKind === "pt") parts.push(`capacityMode=${d.capacityMode ?? "reject"}`);
+        if (netKind === "timed") parts.push(`saturate=${d.saturate ?? false}`);
+      } else if (d.cvnPlace) {
+        parts.push(
+          d.cvnPlace.class === "control"
+            ? `cvn=control/${d.cvnPlace.sub}`
+            : `cvn=resource/${d.cvnPlace.resource}${d.cvnPlace.param != null ? `(${d.cvnPlace.param})` : ""}`,
+        );
+      }
+      lines.push(parts.join(" "));
     } else {
       const d = n.data as TransitionData;
-      const prio = d.priority == null ? "" : ` priority=${d.priority}`;
-      lines.push(`Transition ${n.id} label="${d.label}"${prio}`);
+      const parts = [`Transition ${n.id} label="${d.label}"`];
+      if (d.priority != null) parts.push(`priority=${d.priority}`);
+      if (netKind === "timed" && d.interval) {
+        parts.push(`interval=${formatTimeInterval(d.interval)}`);
+        parts.push(`core=${d.core ?? 0}`);
+        parts.push(`suspendable=${d.suspendable ?? false}`);
+      }
+      if (netKind === "cvn") {
+        parts.push(`cvnKind=${d.cvnKind ?? "Sequential"}`);
+        if (d.scope) parts.push(`scope=${d.scope}`);
+        if (d.family) parts.push(`family=${d.family}`);
+        if (d.anchors) parts.push(`anchors=${d.anchors}`);
+      }
+      lines.push(parts.join(" "));
     }
   }
   for (const e of edges) {
-    lines.push(
+    const parts = [
       `Arc ${e.source} -> ${e.target} type=${e.data?.arcType ?? "normal"} weight=${e.data?.weight ?? 1}`,
-    );
+    ];
+    if (netKind === "cvn" && e.data?.cvnArc) {
+      const kind = e.data.cvnArc;
+      if (kind.type === "guard") parts.push(`guard="${kind.guard}"`);
+      else if (kind.type === "update") parts.push(`update="${kind.update}"`);
+      else parts.push("cvnArc=plain");
+    }
+    lines.push(parts.join(" "));
   }
   return lines.join("\n");
 }

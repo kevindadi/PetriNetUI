@@ -1,0 +1,190 @@
+import type { Translator } from "../i18n";
+import {
+  canAdvanceTime,
+  type AnalysisResult,
+  type SimState,
+} from "../simulation";
+import type { NetKind, PetriEdge, PetriNode, PlaceData, TransitionData } from "../types";
+import { formatTimeInterval } from "../types";
+
+type SimulationPanelProps = {
+  t: Translator;
+  netKind: NetKind;
+  nodes: PetriNode[];
+  edges: PetriEdge[];
+  simulating: boolean;
+  autoPlay: boolean;
+  stepCount: number;
+  simState: SimState;
+  enabled: string[];
+  waiting: string[];
+  analysis: AnalysisResult | null;
+  onStart: () => void;
+  onStep: () => void;
+  onAdvanceTime: () => void;
+  onToggleAuto: () => void;
+  onReset: () => void;
+  onStop: () => void;
+  onFire: (id: string) => void;
+  onAnalyze: () => void;
+};
+
+function labelOf(nodes: PetriNode[], id: string): string {
+  const n = nodes.find((node) => node.id === id);
+  return (n?.data as TransitionData | PlaceData | undefined)?.label ?? id;
+}
+
+export function SimulationPanel({
+  t,
+  netKind,
+  nodes,
+  edges,
+  simulating,
+  autoPlay,
+  stepCount,
+  simState,
+  enabled,
+  waiting,
+  analysis,
+  onStart,
+  onStep,
+  onAdvanceTime,
+  onToggleAuto,
+  onReset,
+  onStop,
+  onFire,
+  onAnalyze,
+}: SimulationPanelProps) {
+  const canAdvance = canAdvanceTime(nodes, edges, simState, netKind);
+
+  return (
+    <div className="sim-panel">
+      <p className="hint">
+        {netKind === "timed" ? t("simKindTimed") : netKind === "cvn" ? t("simKindCvn") : t("simKindPt")}
+      </p>
+      <div className="sim-controls">
+        {!simulating ? (
+          <button onClick={onStart}>{t("simStart")}</button>
+        ) : (
+          <>
+            <button onClick={onStep} disabled={enabled.length === 0 && !canAdvance}>
+              {t("simStep")}
+            </button>
+            {netKind === "timed" && (
+              <button onClick={onAdvanceTime} disabled={!canAdvance}>
+                {t("simAdvanceTime")}
+              </button>
+            )}
+            <button onClick={onToggleAuto}>{autoPlay ? t("simPause") : t("simAuto")}</button>
+            <button onClick={onReset}>{t("simReset")}</button>
+            <button onClick={onStop}>{t("simStop")}</button>
+          </>
+        )}
+      </div>
+
+      {simulating && (
+        <div className="sim-status">
+          <p className="sim-steps">{t("simSteps", { count: stepCount })}</p>
+          {netKind === "timed" && (
+            <p className="sim-steps">{t("simTime", { time: simState.time })}</p>
+          )}
+          <h3>{t("simMarking")}</h3>
+          <div className="sim-marking">
+            {nodes
+              .filter((n) => n.type === "place")
+              .map((p) => (
+                <div key={p.id} className="sim-marking-row">
+                  <span>{(p.data as PlaceData).label}</span>
+                  <span>{simState.marking[p.id] ?? 0}</span>
+                </div>
+              ))}
+          </div>
+          {netKind === "timed" && (
+            <>
+              <h3>{t("simClocks")}</h3>
+              <div className="sim-marking">
+                {nodes
+                  .filter((n) => n.type === "transition")
+                  .map((tr) => {
+                    const d = tr.data as TransitionData;
+                    const interval = d.interval;
+                    return (
+                      <div key={tr.id} className="sim-marking-row">
+                        <span>
+                          {d.label}
+                          {interval ? ` ${formatTimeInterval(interval)}` : ""}
+                        </span>
+                        <span>{simState.clocks[tr.id] ?? "—"}</span>
+                      </div>
+                    );
+                  })}
+              </div>
+            </>
+          )}
+          {netKind === "cvn" && Object.keys(simState.vars).length > 0 && (
+            <>
+              <h3>{t("simVars")}</h3>
+              <div className="sim-marking">
+                {Object.entries(simState.vars)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([name, value]) => (
+                    <div key={name} className="sim-marking-row">
+                      <span>{name}</span>
+                      <span>{value}</span>
+                    </div>
+                  ))}
+              </div>
+            </>
+          )}
+          <h3>{t("simEnabled")}</h3>
+          <div className="sim-enabled">
+            {enabled.length === 0 ? (
+              <p className="hint">{t("simNoEnabled")}</p>
+            ) : (
+              enabled.map((id) => (
+                <button key={id} onClick={() => onFire(id)}>
+                  {labelOf(nodes, id)}
+                </button>
+              ))
+            )}
+          </div>
+          {waiting.length > 0 && (
+            <>
+              <h3>{t("simWaiting")}</h3>
+              <div className="sim-enabled">
+                {waiting.map((id) => (
+                  <span key={id} className="sim-waiting-item">
+                    {labelOf(nodes, id)}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      <button className="sim-analyze-btn" onClick={onAnalyze}>
+        {t("simAnalyze")}
+      </button>
+
+      {analysis && (
+        <div className="sim-analysis">
+          <p>{t("simStates", { count: analysis.stateCount })}</p>
+          <p>{analysis.truncated ? t("simUnbounded") : t("simBounded")}</p>
+          <p>{t("simDeadlocks", { count: analysis.deadlockCount })}</p>
+          <h3>{t("simMaxTokens")}</h3>
+          <div className="sim-marking">
+            {nodes
+              .filter((n) => n.type === "place")
+              .map((p) => (
+                <div key={p.id} className="sim-marking-row">
+                  <span>{(p.data as PlaceData).label}</span>
+                  <span>{analysis.maxTokens[p.id] ?? 0}</span>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
