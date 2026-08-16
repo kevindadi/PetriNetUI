@@ -816,20 +816,6 @@ function App() {
           </span>
         )}
         <span className="spacer" />
-        <button
-          className={selectMode ? "active" : ""}
-          onClick={() => setSelectMode((s) => !s)}
-          title={t("selectTitle")}
-        >
-          {t("select")}
-        </button>
-        <button
-          className={snapEnabled ? "active" : ""}
-          onClick={() => setSnapEnabled((s) => !s)}
-          title={t("snapTitle")}
-        >
-          {t("snap")}
-        </button>
         <button onClick={clearAll}>{t("clear")}</button>
         <button onClick={handleOpen}>{t("open")}</button>
         <button onClick={handleSave}>{t("save")}</button>
