@@ -153,6 +153,8 @@ body,
   padding: 8px 12px;
   background: #f3f4f6;
   border-bottom: 1px solid #e5e7eb;
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .toolbar .spacer {
@@ -1193,6 +1195,53 @@ body,
   border-color: #fca5a5;
 }
 
+.analysis-transitions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.analysis-trans {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.85em;
+  color: #374151;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.analysis-trans:hover {
+  background: #e5e7eb;
+}
+
+.analysis-trans.active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.analysis-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.analysis-clear {
+  margin-left: auto;
+  color: #6b7280;
+}
+
 .analysis-canvas {
   flex: 1;
   min-width: 0;
@@ -1240,4 +1289,17 @@ body,
 
 .reach-mark-value {
   font-weight: 600;
+}
+
+.reach-edge-label {
+  position: absolute;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.7em;
+  font-weight: 600;
+  color: #475569;
+  pointer-events: none;
+  white-space: nowrap;
 }
