@@ -10,6 +10,8 @@ type ToolbarProps = {
   pendingSource: string | null;
   netKind: NetKind;
   lang: Language;
+  chatOpen: boolean;
+  simOpen: boolean;
   onUndo: () => void;
   onRedo: () => void;
   onAddPlace: () => void;
@@ -19,7 +21,9 @@ type ToolbarProps = {
   canDelete: boolean;
   onDelete: () => void;
   onClear: () => void;
-  onNetKind: (kind: NetKind) => void;
+  onChooseNetKind: () => void;
+  onToggleChat: () => void;
+  onToggleSim: () => void;
   onLang: (lang: Language) => void;
 };
 
@@ -32,6 +36,8 @@ export function Toolbar({
   pendingSource,
   netKind,
   lang,
+  chatOpen,
+  simOpen,
   onUndo,
   onRedo,
   onAddPlace,
@@ -41,41 +47,54 @@ export function Toolbar({
   canDelete,
   onDelete,
   onClear,
-  onNetKind,
+  onChooseNetKind,
+  onToggleChat,
+  onToggleSim,
   onLang,
 }: ToolbarProps) {
+  const kindLabel =
+    netKind === "pt" ? t("netTypePt") : netKind === "timed" ? t("netTypeTimed") : t("netTypeCvn");
+
   return (
     <div className="toolbar">
-      <button onClick={onUndo} disabled={!canUndo} title={t("undoTitle")}>
-        {t("undo")}
-      </button>
-      <button onClick={onRedo} disabled={!canRedo} title={t("redoTitle")}>
-        {t("redo")}
-      </button>
-      <button onClick={onAddPlace}>{t("addPlace")}</button>
-      <button onClick={onAddTransition}>{t("addTransition")}</button>
-      <button className={arcMode ? "active" : ""} onClick={onToggleArcMode}>
-        {t("addArc")}
-      </button>
-      <span className="arc-types">
-        <button
-          className={arcType === "normal" ? "active" : ""}
-          onClick={() => onArcType("normal")}
-        >
-          {t("arcNormal")}
+      <span className="tb-group">
+        <button onClick={onUndo} disabled={!canUndo} title={t("undoTitle")}>
+          {t("undo")}
         </button>
-        <button
-          className={arcType === "reset" ? "active" : ""}
-          onClick={() => onArcType("reset")}
-        >
-          {t("arcReset")}
+        <button onClick={onRedo} disabled={!canRedo} title={t("redoTitle")}>
+          {t("redo")}
         </button>
-        <button
-          className={arcType === "inhibitor" ? "active" : ""}
-          onClick={() => onArcType("inhibitor")}
-        >
-          {t("arcInhibit")}
+      </span>
+      <span className="tb-sep" />
+      <span className="tb-group">
+        <button onClick={onAddPlace}>{t("addPlace")}</button>
+        <button onClick={onAddTransition}>{t("addTransition")}</button>
+      </span>
+      <span className="tb-sep" />
+      <span className="tb-group">
+        <button className={arcMode ? "active" : ""} onClick={onToggleArcMode}>
+          {t("addArc")}
         </button>
+        <span className="arc-types">
+          <button
+            className={arcType === "normal" ? "active" : ""}
+            onClick={() => onArcType("normal")}
+          >
+            {t("arcNormal")}
+          </button>
+          <button
+            className={arcType === "reset" ? "active" : ""}
+            onClick={() => onArcType("reset")}
+          >
+            {t("arcReset")}
+          </button>
+          <button
+            className={arcType === "inhibitor" ? "active" : ""}
+            onClick={() => onArcType("inhibitor")}
+          >
+            {t("arcInhibit")}
+          </button>
+        </span>
       </span>
       {arcMode && (
         <span className="arc-mode-hint">
@@ -83,31 +102,42 @@ export function Toolbar({
         </span>
       )}
       <span className="spacer" />
-      <button onClick={onDelete} disabled={!canDelete} title={t("deleteTitle")}>
-        {t("delete")}
-      </button>
-      <button onClick={onClear}>{t("clear")}</button>
-      <select
-        className="lang-select"
-        value={netKind}
-        onChange={(e) => onNetKind(e.target.value as NetKind)}
-        title={t("netType")}
-      >
-        <option value="pt">{t("netTypePt")}</option>
-        <option value="timed">{t("netTypeTimed")}</option>
-        <option value="cvn">{t("netTypeCvn")}</option>
-      </select>
-      <select
-        className="lang-select"
-        value={lang}
-        onChange={(e) => onLang(e.target.value as Language)}
-      >
-        {languages.map((l) => (
-          <option key={l.code} value={l.code}>
-            {l.label}
-          </option>
-        ))}
-      </select>
+      <span className="tb-group">
+        <button
+          className={chatOpen ? "active" : ""}
+          onClick={onToggleChat}
+          title={t("menuShowChat")}
+        >
+          {t("chatOpen")}
+        </button>
+        <button className={simOpen ? "active" : ""} onClick={onToggleSim} title={t("menuShowSim")}>
+          {t("simToggle")}
+        </button>
+      </span>
+      <span className="tb-sep" />
+      <span className="tb-group">
+        <button onClick={onDelete} disabled={!canDelete} title={t("deleteTitle")}>
+          {t("delete")}
+        </button>
+        <button onClick={onClear}>{t("clear")}</button>
+      </span>
+      <span className="tb-sep" />
+      <span className="tb-group">
+        <button className="kind-button" onClick={onChooseNetKind} title={t("netType")}>
+          {t("kindButton", { kind: kindLabel })}
+        </button>
+        <select
+          className="lang-select"
+          value={lang}
+          onChange={(e) => onLang(e.target.value as Language)}
+        >
+          {languages.map((l) => (
+            <option key={l.code} value={l.code}>
+              {l.label}
+            </option>
+          ))}
+        </select>
+      </span>
     </div>
   );
 }

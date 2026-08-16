@@ -263,8 +263,6 @@ export type Selection =
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
-export type ActivePanel = "chat" | "props" | "simulation";
-
 export type AIPlace = {
   id?: string;
   label?: string;

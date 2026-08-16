@@ -29,7 +29,12 @@ import { MenuBar, type MenuDef } from "./components/MenuBar";
 import { Toolbar } from "./components/Toolbar";
 import { ChatPanel } from "./components/ChatPanel";
 import { PropsPanel } from "./components/PropsPanel";
+import { NetOverview } from "./components/NetOverview";
 import { SimulationPanel } from "./components/SimulationPanel";
+import { StatusBar } from "./components/StatusBar";
+import { NetKindModal } from "./components/NetKindModal";
+import { CanvasLegend } from "./components/CanvasLegend";
+import { AnalysisView } from "./components/AnalysisView";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { useNetHistory } from "./hooks/useNetHistory";
 import {
@@ -53,9 +58,9 @@ import {
   type CvnArcKind,
   type Selection,
   type ChatMessage,
-  type ActivePanel,
 } from "./types";
 import { makeTranslator, type Language } from "./i18n";
+import { NET_EXAMPLES } from "./examples";
 import {
   initialSimState,
   enabledTransitions,
@@ -66,7 +71,6 @@ import {
   summarizeAnalysis,
   pickTransition,
   type SimState,
-  type AnalysisResult,
 } from "./simulation";
 
 const nodeTypes = { place: PlaceNode, transition: TransitionNode };
@@ -103,7 +107,10 @@ function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-  const [activePanel, setActivePanel] = useState<ActivePanel>("chat");
+  const [chatOpen, setChatOpen] = useState(false);
+  const [simOpen, setSimOpen] = useState(false);
+  const [simCollapsed, setSimCollapsed] = useState(false);
+  const [showNetKind, setShowNetKind] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(false);
   const [netKind, setNetKind] = useState<NetKind>("pt");
@@ -118,7 +125,7 @@ function App() {
   const [simulating, setSimulating] = useState(false);
   const [autoPlay, setAutoPlay] = useState(false);
   const [stepCount, setStepCount] = useState(0);
-  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [showAnalysis, setShowAnalysis] = useState(false);
   const rfInstance = useRef<ReactFlowInstance<PetriNode, PetriEdge> | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const clipboardRef = useRef<{ nodes: PetriNode[]; edges: PetriEdge[] } | null>(null);
@@ -273,6 +280,16 @@ function App() {
     [simulating, nodes, edges, simState, netKind],
   );
 
+  const idleState = useMemo(() => initialSimState(nodes, edges, netKind), [nodes, edges, netKind]);
+  const idleEnabled = useMemo(
+    () => enabledTransitions(nodes, edges, idleState, netKind),
+    [nodes, edges, idleState, netKind],
+  );
+  const idleWaiting = useMemo(
+    () => waitingTransitions(nodes, edges, idleState, netKind),
+    [nodes, edges, idleState, netKind],
+  );
+
   const fireTransitionById = useCallback(
     (id: string) => {
       setSimState((s) => fireTransition(nodes, edges, s, id, netKind));
@@ -315,8 +332,9 @@ function App() {
   const startSimulation = useCallback(() => {
     setSimState(initialSimState(nodes, edges, netKind));
     setStepCount(0);
-    setAnalysis(null);
     setAutoPlay(false);
+    setSimCollapsed(false);
+    setSimOpen(true);
     setSimulating(true);
   }, [nodes, edges, netKind]);
 
@@ -350,9 +368,8 @@ function App() {
   }, [nodes, edges, simState, netKind, fireTransitionById]);
 
   const runAnalysis = useCallback(() => {
-    const init = simulating ? simState : initialSimState(nodes, edges, netKind);
-    setAnalysis(analyze(nodes, edges, init, netKind));
-  }, [nodes, edges, simulating, simState, netKind]);
+    setShowAnalysis(true);
+  }, []);
 
   useEffect(() => {
     if (!autoPlay || !simulating) return;
@@ -370,15 +387,19 @@ function App() {
       if (n.type === "place" && simulating) {
         data = { ...data, tokens: simState.marking[n.id] ?? 0 } as PlaceData;
       }
-      if (n.type === "transition" && enabled.includes(n.id)) {
-        className = className ? `${className} enabled-transition` : "enabled-transition";
-      } else if (n.type === "transition" && waiting.includes(n.id)) {
-        className = className ? `${className} waiting-transition` : "waiting-transition";
+      const activeEnabled = simulating ? enabled : idleEnabled;
+      const activeWaiting = simulating ? waiting : idleWaiting;
+      if (n.type === "transition" && activeEnabled.includes(n.id)) {
+        const cls = simulating ? "enabled-transition" : "enabled-idle";
+        className = className ? `${className} ${cls}` : cls;
+      } else if (n.type === "transition" && activeWaiting.includes(n.id)) {
+        const cls = simulating ? "waiting-transition" : "waiting-idle";
+        className = className ? `${className} ${cls}` : cls;
       }
       if (className === n.className && data === n.data) return n;
       return { ...n, className, data };
     });
-  }, [nodes, pendingSource, simulating, simState, enabled, waiting]);
+  }, [nodes, pendingSource, simulating, simState, enabled, waiting, idleEnabled, idleWaiting]);
 
   const onNodesDelete = useCallback(
     (deleted: PetriNode[]) => {
@@ -437,7 +458,6 @@ function App() {
         }),
       );
       setSimulating(false);
-      setAnalysis(null);
     },
     [netKind, scheduleCommit, setNodes, setEdges],
   );
@@ -501,6 +521,23 @@ function App() {
     setNodes(net.nodes ?? []);
     setEdges(net.edges ?? []);
   }, [setNodes, setEdges, scheduleCommit]);
+
+  const loadExample = useCallback(
+    (build: () => PetriNet) => {
+      const net = build();
+      scheduleCommit();
+      setNetKind(net.netKind);
+      setNodes(net.nodes);
+      setEdges(net.edges);
+      setSelection(null);
+      setSimulating(false);
+      setAutoPlay(false);
+      setSimOpen(false);
+      setShowAnalysis(false);
+      setTimeout(() => rfInstance.current?.fitView({ padding: 0.2 }), 80);
+    },
+    [scheduleCommit, setNetKind, setNodes, setEdges],
+  );
 
   const sendChat = useCallback(async () => {
     const prompt = chatInput.trim();
@@ -582,15 +619,17 @@ function App() {
         { type: "action", label: t("menuSelect"), checked: selectMode, onClick: () => setSelectMode((s) => !s) },
         { type: "action", label: t("menuSnap"), checked: snapEnabled, onClick: () => setSnapEnabled((s) => !s) },
         { type: "separator" },
-        { type: "action", label: t("menuPanelChat"), checked: activePanel === "chat", onClick: () => setActivePanel("chat") },
-        { type: "action", label: t("menuPanelProps"), checked: activePanel === "props", onClick: () => setActivePanel("props") },
-        {
-          type: "action",
-          label: t("menuPanelSimulation"),
-          checked: activePanel === "simulation",
-          onClick: () => setActivePanel("simulation"),
-        },
+        { type: "action", label: t("menuShowSim"), checked: simOpen, onClick: () => setSimOpen((s) => !s) },
+        { type: "action", label: t("menuShowChat"), checked: chatOpen, onClick: () => setChatOpen((s) => !s) },
       ],
+    },
+    {
+      label: t("menuExamples"),
+      items: NET_EXAMPLES.map((ex) => ({
+        type: "action",
+        label: t(ex.key),
+        onClick: () => loadExample(ex.build),
+      })),
     },
     {
       label: t("menuHelp"),
@@ -622,7 +661,11 @@ function App() {
         canDelete={hasSelection}
         onDelete={deleteSelected}
         onClear={clearAll}
-        onNetKind={changeNetKind}
+        chatOpen={chatOpen}
+        simOpen={simOpen}
+        onChooseNetKind={() => setShowNetKind(true)}
+        onToggleChat={() => setChatOpen((o) => !o)}
+        onToggleSim={() => setSimOpen((o) => !o)}
         onLang={(next) => {
           setLang(next);
           localStorage.setItem("pn-lang", next);
@@ -667,56 +710,36 @@ function App() {
               nodeColor={(n) => (n.type === "place" ? "#dbeafe" : "#fef3c7")}
             />
           </ReactFlow>
+
+          <CanvasLegend t={t} />
+
+          {chatOpen && (
+            <div className="chat-float">
+              <div className="chat-float-header">
+                <span>{t("tabChat")}</span>
+                <button
+                  className="chat-float-close"
+                  onClick={() => setChatOpen(false)}
+                  title={t("chatClose")}
+                >
+                  ✕
+                </button>
+              </div>
+              <ChatPanel
+                t={t}
+                netKind={netKind}
+                messages={chatMessages}
+                input={chatInput}
+                loading={chatLoading}
+                onInput={setChatInput}
+                onSend={sendChat}
+              />
+            </div>
+          )}
         </div>
 
         <aside className="inspector">
-          <div className="panel-tabs">
-            <button className={activePanel === "chat" ? "active" : ""} onClick={() => setActivePanel("chat")}>
-              {t("tabChat")}
-            </button>
-            <button className={activePanel === "props" ? "active" : ""} onClick={() => setActivePanel("props")}>
-              {t("tabProps")}
-            </button>
-            <button
-              className={activePanel === "simulation" ? "active" : ""}
-              onClick={() => setActivePanel("simulation")}
-            >
-              {t("tabSimulation")}
-            </button>
-          </div>
-          {activePanel === "chat" ? (
-            <ChatPanel
-              t={t}
-              netKind={netKind}
-              messages={chatMessages}
-              input={chatInput}
-              loading={chatLoading}
-              onInput={setChatInput}
-              onSend={sendChat}
-            />
-          ) : activePanel === "simulation" ? (
-            <SimulationPanel
-              t={t}
-              netKind={netKind}
-              nodes={nodes}
-              edges={edges}
-              simulating={simulating}
-              autoPlay={autoPlay}
-              stepCount={stepCount}
-              simState={simState}
-              enabled={enabled}
-              waiting={waiting}
-              analysis={analysis}
-              onStart={startSimulation}
-              onStep={fireStep}
-              onAdvanceTime={advanceSimTime}
-              onToggleAuto={() => setAutoPlay((a) => !a)}
-              onReset={resetSimulation}
-              onStop={stopSimulation}
-              onFire={fireTransitionById}
-              onAnalyze={runAnalysis}
-            />
-          ) : (
+          {selectedNode || selectedEdge ? (
             <PropsPanel
               t={t}
               netKind={netKind}
@@ -728,11 +751,84 @@ function App() {
               onUpdateEdgeType={updateEdgeType}
               onUpdateEdgeCvn={updateEdgeCvn}
             />
+          ) : (
+            <NetOverview
+              t={t}
+              netKind={netKind}
+              places={nodes.filter((n) => n.type === "place").length}
+              transitions={nodes.filter((n) => n.type === "transition").length}
+              arcs={edges.length}
+              onAddPlace={addPlace}
+              onAddTransition={addTransition}
+              onChangeKind={() => setShowNetKind(true)}
+              onStartSim={startSimulation}
+              onAnalyze={runAnalysis}
+            />
           )}
         </aside>
       </div>
 
+      {simOpen && (
+        <SimulationPanel
+          t={t}
+          netKind={netKind}
+          nodes={nodes}
+          edges={edges}
+          simulating={simulating}
+          autoPlay={autoPlay}
+          stepCount={stepCount}
+          simState={simState}
+          enabled={enabled}
+          waiting={waiting}
+          collapsed={simCollapsed}
+          onToggleCollapsed={() => setSimCollapsed((c) => !c)}
+          onStart={startSimulation}
+          onStep={fireStep}
+          onAdvanceTime={advanceSimTime}
+          onToggleAuto={() => setAutoPlay((a) => !a)}
+          onReset={resetSimulation}
+          onStop={stopSimulation}
+          onFire={fireTransitionById}
+          onAnalyze={runAnalysis}
+        />
+      )}
+
+      <StatusBar
+        t={t}
+        netKind={netKind}
+        places={nodes.filter((n) => n.type === "place").length}
+        transitions={nodes.filter((n) => n.type === "transition").length}
+        arcs={edges.length}
+        arcMode={arcMode}
+        pendingSource={pendingSource !== null}
+        selectMode={selectMode}
+        snapEnabled={snapEnabled}
+      />
+
+      {showNetKind && (
+        <NetKindModal
+          t={t}
+          current={netKind}
+          onSelect={(kind) => {
+            changeNetKind(kind);
+            setShowNetKind(false);
+          }}
+          onClose={() => setShowNetKind(false)}
+        />
+      )}
       {showShortcuts && <ShortcutsModal t={t} onClose={() => setShowShortcuts(false)} />}
+
+      {showAnalysis && (
+        <div className="analysis-overlay">
+          <AnalysisView
+            t={t}
+            netKind={netKind}
+            nodes={nodes}
+            edges={edges}
+            onBack={() => setShowAnalysis(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }

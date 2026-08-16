@@ -321,12 +321,26 @@ export function pickTransition(ids: string[], nodes: PetriNode[]): string | null
   return top[Math.floor(Math.random() * top.length)] ?? null;
 }
 
+export type ReachabilityState = {
+  marking: Marking;
+  level: number;
+  deadlock: boolean;
+};
+
+export type ReachabilityEdge = {
+  source: number;
+  target: number;
+  transitionId: string;
+};
+
 export type AnalysisResult = {
   stateCount: number;
   truncated: boolean;
   maxTokens: Record<string, number>;
   deadlockCount: number;
   deadlockMarkings: Marking[];
+  states: ReachabilityState[];
+  edges: ReachabilityEdge[];
 };
 
 function stateKey(state: SimState, places: string[], netKind: NetKind): string {
@@ -355,7 +369,10 @@ export function analyze(
       : initial;
 
   const visited = new Set<string>([stateKey(seed, places, keyKind)]);
-  const queue: SimState[] = [seed];
+  const stateIdByKey = new Map<string, number>([[stateKey(seed, places, keyKind), 0]]);
+  const states: ReachabilityState[] = [{ marking: seed.marking, level: 0, deadlock: false }];
+  const graphEdges: ReachabilityEdge[] = [];
+  const queue: { state: SimState; id: number }[] = [{ state: seed, id: 0 }];
   const maxTokens: Record<string, number> = {};
   const deadlockMarkings: Marking[] = [];
   let truncated = false;
@@ -368,7 +385,7 @@ export function analyze(
   };
 
   while (queue.length > 0) {
-    const current = queue.shift()!;
+    const { state: current, id: curId } = queue.shift()!;
     updateMax(current.marking);
     const enabled =
       netKind === "timed"
@@ -376,7 +393,10 @@ export function analyze(
             isStructurallyEnabled(nodes, edges, current.marking, id, "timed"),
           )
         : enabledTransitions(nodes, edges, current, netKind);
-    if (enabled.length === 0) deadlockMarkings.push(current.marking);
+    if (enabled.length === 0) {
+      states[curId].deadlock = true;
+      deadlockMarkings.push(current.marking);
+    }
     for (const id of enabled) {
       const next =
         netKind === "timed"
@@ -388,14 +408,23 @@ export function analyze(
             }
           : fireTransition(nodes, edges, current, id, netKind);
       const key = stateKey(next, places, keyKind);
-      if (!visited.has(key)) {
+      let targetId = stateIdByKey.get(key);
+      if (targetId === undefined) {
         if (visited.size >= maxStates) {
           truncated = true;
           break;
         }
+        targetId = states.length;
         visited.add(key);
-        queue.push(next);
+        stateIdByKey.set(key, targetId);
+        states.push({
+          marking: next.marking,
+          level: states[curId].level + 1,
+          deadlock: false,
+        });
+        queue.push({ state: next, id: targetId });
       }
+      graphEdges.push({ source: curId, target: targetId, transitionId: id });
     }
     if (truncated) break;
   }
@@ -406,6 +435,8 @@ export function analyze(
     maxTokens,
     deadlockCount: deadlockMarkings.length,
     deadlockMarkings,
+    states,
+    edges: graphEdges,
   };
 }
 
