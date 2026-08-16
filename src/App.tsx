@@ -73,6 +73,72 @@ const defaultEdgeOptions = {
   markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: "#1f2937" },
 };
 
+type MenuAction = {
+  type: "action";
+  label: string;
+  disabled?: boolean;
+  checked?: boolean;
+  onClick: () => void;
+};
+type MenuSeparator = { type: "separator" };
+type MenuItem = MenuAction | MenuSeparator;
+type MenuDef = { label: string; items: MenuItem[] };
+
+function MenuBar({ menus }: { menus: MenuDef[] }) {
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: globalThis.MouseEvent) => {
+      if (barRef.current && !barRef.current.contains(e.target as globalThis.Node)) {
+        setOpenMenu(null);
+      }
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <nav className="menubar" ref={barRef}>
+      {menus.map((menu) => {
+        const open = openMenu === menu.label;
+        return (
+          <div key={menu.label} className="menu-root">
+            <button
+              className={open ? "menu-title active" : "menu-title"}
+              onClick={() => setOpenMenu(open ? null : menu.label)}
+            >
+              {menu.label}
+            </button>
+            {open && (
+              <div className="menu-dropdown">
+                {menu.items.map((item, i) =>
+                  item.type === "separator" ? (
+                    <div key={i} className="menu-separator" />
+                  ) : (
+                    <button
+                      key={i}
+                      className="menu-item"
+                      disabled={item.disabled}
+                      onClick={() => {
+                        item.onClick();
+                        setOpenMenu(null);
+                      }}
+                    >
+                      <span>{item.label}</span>
+                      {item.checked && <span className="menu-check">✓</span>}
+                    </button>
+                  ),
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+
 type Selection =
   | { kind: "node"; id: string }
   | { kind: "edge"; id: string }
@@ -121,6 +187,7 @@ function App() {
   const [stepCount, setStepCount] = useState(0);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const rfInstance = useRef<ReactFlowInstance<PetriNode, PetriEdge> | null>(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   const pastRef = useRef<PetriNet[]>([]);
   const futureRef = useRef<PetriNet[]>([]);
@@ -644,8 +711,73 @@ function App() {
     };
   const edgeCvn: CvnArcKind = selectedEdge?.data?.cvnArc ?? { type: "plain" };
 
+  const menus: MenuDef[] = [
+    {
+      label: t("menuFile"),
+      items: [
+        { type: "action", label: t("menuOpen"), onClick: handleOpen },
+        { type: "action", label: t("menuSave"), onClick: handleSave },
+        { type: "separator" },
+        { type: "action", label: t("menuClear"), onClick: clearAll },
+      ],
+    },
+    {
+      label: t("menuEdit"),
+      items: [
+        { type: "action", label: t("menuUndo"), disabled: !canUndo, onClick: undo },
+        { type: "action", label: t("menuRedo"), disabled: !canRedo, onClick: redo },
+        { type: "separator" },
+        { type: "action", label: t("menuCopy"), onClick: copySelection },
+        { type: "action", label: t("menuPaste"), onClick: pasteSelection },
+      ],
+    },
+    {
+      label: t("menuView"),
+      items: [
+        {
+          type: "action",
+          label: t("menuSelect"),
+          checked: selectMode,
+          onClick: () => setSelectMode((s) => !s),
+        },
+        {
+          type: "action",
+          label: t("menuSnap"),
+          checked: snapEnabled,
+          onClick: () => setSnapEnabled((s) => !s),
+        },
+        { type: "separator" },
+        {
+          type: "action",
+          label: t("menuPanelChat"),
+          checked: activePanel === "chat",
+          onClick: () => setActivePanel("chat"),
+        },
+        {
+          type: "action",
+          label: t("menuPanelProps"),
+          checked: activePanel === "props",
+          onClick: () => setActivePanel("props"),
+        },
+        {
+          type: "action",
+          label: t("menuPanelSimulation"),
+          checked: activePanel === "simulation",
+          onClick: () => setActivePanel("simulation"),
+        },
+      ],
+    },
+    {
+      label: t("menuHelp"),
+      items: [
+        { type: "action", label: t("menuShortcuts"), onClick: () => setShowShortcuts(true) },
+      ],
+    },
+  ];
+
   return (
     <div className="app">
+      <MenuBar menus={menus} />
       <div className="toolbar">
         <button onClick={undo} disabled={!canUndo} title={t("undoTitle")}>
           {t("undo")}
@@ -1335,6 +1467,25 @@ function App() {
           )}
         </aside>
       </div>
+
+      {showShortcuts && (
+        <div className="modal-overlay" onClick={() => setShowShortcuts(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>{t("shortcutsTitle")}</h2>
+            <ul>
+              <li>{t("shortcutUndo")}</li>
+              <li>{t("shortcutRedo")}</li>
+              <li>{t("shortcutCopy")}</li>
+              <li>{t("shortcutPaste")}</li>
+              <li>{t("shortcutDelete")}</li>
+              <li>{t("shortcutSend")}</li>
+            </ul>
+            <button className="modal-close" onClick={() => setShowShortcuts(false)}>
+              {t("shortcutsClose")}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
