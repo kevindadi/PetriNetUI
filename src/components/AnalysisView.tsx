@@ -20,6 +20,7 @@ import {
 } from "@xyflow/react";
 import type { Translator } from "../i18n";
 import { analyze, initialSimState, type AnalysisResult } from "../simulation";
+import { computeLayout } from "../layout";
 import type { NetKind, PetriEdge, PetriNode, PlaceData, TransitionData } from "../types";
 
 type AnalysisViewProps = {
@@ -200,7 +201,9 @@ function assignLanes(edges: AnalysisResult["edges"]): number[] {
   return lane;
 }
 
-function layoutGraph(states: AnalysisResult["states"]): { x: number; y: number }[] {
+const BFS_LAYOUT_LIMIT = 600;
+
+function bfsLayout(states: AnalysisResult["states"]): Record<string, { x: number; y: number }> {
   const levels = new Map<number, number[]>();
   states.forEach((s, i) => {
     const arr = levels.get(s.level) ?? [];
@@ -211,14 +214,28 @@ function layoutGraph(states: AnalysisResult["states"]): { x: number; y: number }
   for (const arr of levels.values()) maxCol = Math.max(maxCol, arr.length);
   const W = 250;
   const H = 110;
-  const pos: { x: number; y: number }[] = new Array(states.length);
+  const pos: Record<string, { x: number; y: number }> = {};
   for (const [level, arr] of levels) {
     const startY = ((maxCol - arr.length) * H) / 2;
     arr.forEach((idx, j) => {
-      pos[idx] = { x: level * W, y: startY + j * H };
+      pos[String(idx)] = { x: level * W, y: startY + j * H };
     });
   }
   return pos;
+}
+
+function computeReachLayout(
+  states: AnalysisResult["states"],
+  edges: AnalysisResult["edges"],
+): Record<string, { x: number; y: number }> {
+  if (states.length > BFS_LAYOUT_LIMIT) return bfsLayout(states);
+  const nodeSize = states.map((s, i) => ({
+    id: String(i),
+    width: 110,
+    height: Math.max(34, Object.keys(s.marking).length * 16 + 14),
+  }));
+  const layoutEdges = edges.map((e) => ({ source: String(e.source), target: String(e.target) }));
+  return computeLayout(nodeSize, layoutEdges, { rankdir: "LR", nodesep: 40, ranksep: 120 });
 }
 
 export function AnalysisView({ t, netKind, nodes, edges, onBack }: AnalysisViewProps) {
@@ -284,11 +301,11 @@ export function AnalysisView({ t, netKind, nodes, edges, onBack }: AnalysisViewP
 
   const rfData = useMemo(() => {
     if (!result) return { nodes: [], edges: [] };
-    const pos = layoutGraph(result.states);
+    const pos = computeReachLayout(result.states, result.edges);
     const rn: Node<ReachNodeData, "state">[] = result.states.map((s, i) => ({
       id: String(i),
       type: "state",
-      position: pos[i],
+      position: pos[String(i)] ?? { x: 0, y: 0 },
       data: {
         marking: placeOrder.map((pid) => [placeLabels[pid] ?? pid, s.marking[pid] ?? 0]),
         deadlock: s.deadlock,
