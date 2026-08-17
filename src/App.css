@@ -1120,6 +1120,12 @@ body,
   font-size: 0.95em;
 }
 
+.analysis-error {
+  color: #b91c1c;
+  padding: 24px;
+  text-align: center;
+}
+
 .analysis-body {
   display: flex;
   flex: 1;

@@ -19,9 +19,11 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import type { Translator } from "../i18n";
-import { analyze, initialSimState, type AnalysisResult } from "../simulation";
+import { type AnalysisResult } from "../simulation";
 import { computeLayout } from "../layout";
+import { flowToSemantic } from "../model";
 import type { NetKind, PetriEdge, PetriNode, PlaceData, TransitionData } from "../types";
+import { invoke } from "@tauri-apps/api/core";
 
 type AnalysisViewProps = {
   t: Translator;
@@ -242,6 +244,7 @@ export function AnalysisView({ t, netKind, nodes, edges, onBack }: AnalysisViewP
   const [maxStates, setMaxStates] = useState(5000);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
   const rfRef = useRef<ReactFlowInstance<Node<ReachNodeData, "state">, Edge<ReachEdgeData>> | null>(
@@ -285,13 +288,23 @@ export function AnalysisView({ t, netKind, nodes, edges, onBack }: AnalysisViewP
     setLoading(true);
     setSelected(null);
     setHighlight(null);
+    setError(null);
     const id = ++runIdRef.current;
-    setTimeout(() => {
+    setTimeout(async () => {
       if (id !== runIdRef.current) return;
-      setResult(
-        analyze(nodes, edges, initialSimState(nodes, edges, netKind), netKind, maxStates),
-      );
-      setLoading(false);
+      try {
+        const res = await invoke<AnalysisResult>("analyze_net", {
+          semantic: flowToSemantic(nodes, edges, netKind),
+          maxStates,
+        });
+        if (id !== runIdRef.current) return;
+        setResult(res);
+      } catch (e) {
+        if (id !== runIdRef.current) return;
+        setError(String(e));
+      } finally {
+        if (id === runIdRef.current) setLoading(false);
+      }
     }, 30);
   }, [nodes, edges, netKind, maxStates]);
 
@@ -373,6 +386,8 @@ export function AnalysisView({ t, netKind, nodes, edges, onBack }: AnalysisViewP
 
       {loading ? (
         <div className="analysis-loading">{t("analyzeRunning")}</div>
+      ) : error ? (
+        <div className="analysis-empty analysis-error">{t("generationFailed", { error })}</div>
       ) : !result || result.states.length === 0 ? (
         <div className="analysis-empty">{t("analyzeStateHint")}</div>
       ) : (
