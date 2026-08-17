@@ -18,6 +18,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
 import "@xyflow/react/dist/style.css";
@@ -764,7 +765,25 @@ function App() {
     },
     {
       label: t("menuHelp"),
-      items: [{ type: "action", label: t("menuShortcuts"), onClick: () => setShowShortcuts(true) }],
+      items: [
+        { type: "action", label: t("menuShortcuts"), onClick: () => setShowShortcuts(true) },
+        { type: "separator" },
+        {
+          type: "action",
+          label: t("helpRepoPt"),
+          onClick: () => void openUrl("https://github.com/kevindadi/ConcBugDect-Rust").catch(() => window.open("https://github.com/kevindadi/ConcBugDect-Rust", "_blank")),
+        },
+        {
+          type: "action",
+          label: t("helpRepoTimed"),
+          onClick: () => void openUrl("https://github.com/kevindadi/PTPN").catch(() => window.open("https://github.com/kevindadi/PTPN", "_blank")),
+        },
+        {
+          type: "action",
+          label: t("helpRepoCvn"),
+          onClick: () => void openUrl("https://github.com/kevindadi/ConcPlanVerify").catch(() => window.open("https://github.com/kevindadi/ConcPlanVerify", "_blank")),
+        },
+      ],
     },
   ];
 
