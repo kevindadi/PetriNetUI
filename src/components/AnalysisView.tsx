@@ -20,7 +20,7 @@ import {
 } from "@xyflow/react";
 import type { Translator } from "../i18n";
 import { type AnalysisResult } from "../simulation";
-import { computeLayout } from "../layout";
+import { computeConcentricLayout } from "../layout";
 import { flowToSemantic } from "../model";
 import type { NetKind, PetriEdge, PetriNode, PlaceData, TransitionData } from "../types";
 import { invoke } from "@tauri-apps/api/core";
@@ -233,11 +233,15 @@ function computeReachLayout(
   if (states.length > BFS_LAYOUT_LIMIT) return bfsLayout(states);
   const nodeSize = states.map((s, i) => ({
     id: String(i),
-    width: 110,
-    height: Math.max(34, Object.keys(s.marking).length * 16 + 14),
+    width: 120,
+    height: Math.max(40, Object.keys(s.marking).length * 16 + 16),
   }));
   const layoutEdges = edges.map((e) => ({ source: String(e.source), target: String(e.target) }));
-  return computeLayout(nodeSize, layoutEdges, { rankdir: "LR", nodesep: 40, ranksep: 120 });
+  const level: Record<string, number> = {};
+  states.forEach((s, i) => {
+    level[String(i)] = s.level;
+  });
+  return computeConcentricLayout(nodeSize, layoutEdges, level, { ringSpacing: 150 });
 }
 
 export function AnalysisView({ t, netKind, nodes, edges, onBack }: AnalysisViewProps) {

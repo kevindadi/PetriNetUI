@@ -622,7 +622,6 @@ function App() {
       const positions = computeLayout(
         net.nodes.map((n) => ({ id: n.id, width: 84, height: 64 })),
         net.edges,
-        { rankdir: "LR", nodesep: 70, ranksep: 110 },
       );
       return {
         ...net,
@@ -640,7 +639,6 @@ function App() {
     const positions = computeLayout(
       nodes.map((n) => ({ id: n.id, width: 84, height: 64 })),
       edges,
-      { rankdir: "LR", nodesep: 70, ranksep: 110 },
     );
     setNodes((nds) => nds.map((n) => ({ ...n, position: positions[n.id] ?? n.position })));
     setTimeout(() => rfInstance.current?.fitView({ padding: 0.2 }), 60);
