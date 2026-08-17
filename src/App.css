@@ -1314,3 +1314,23 @@ body,
   pointer-events: none;
   white-space: nowrap;
 }
+
+.reach-edge-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #cbd5e1;
+  cursor: grab;
+  z-index: 5;
+}
+
+.reach-edge-handle:hover {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+}
+
+.reach-edge-handle:active {
+  cursor: grabbing;
+}

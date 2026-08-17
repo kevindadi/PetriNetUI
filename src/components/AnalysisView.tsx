@@ -10,6 +10,7 @@ import {
   ReactFlow,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   useStore,
   type Edge,
   type EdgeProps,
@@ -60,6 +61,8 @@ type ReachEdgeData = {
   label: string;
   lane: number;
   dimmed: boolean;
+  /** Offset from the edge midpoint (flow coordinates); `null`/missing = straight. */
+  bend?: { x: number; y: number } | null;
 };
 
 function reachAnchor(
@@ -92,9 +95,10 @@ function reachAnchor(
   return [ax + tangentX * lane, ay + tangentY * lane];
 }
 
-function ReachEdge({ source, target, data }: EdgeProps<Edge<ReachEdgeData>>) {
+function ReachEdge({ id, source, target, data }: EdgeProps<Edge<ReachEdgeData>>) {
   const sourceNode = useStore((s) => s.nodeLookup.get(source) ?? null);
   const targetNode = useStore((s) => s.nodeLookup.get(target) ?? null);
+  const { screenToFlowPosition, setEdges } = useReactFlow<Node<ReachNodeData, "state">, Edge<ReachEdgeData>>();
 
   if (!sourceNode || !targetNode) return null;
 
@@ -109,8 +113,15 @@ function ReachEdge({ source, target, data }: EdgeProps<Edge<ReachEdgeData>>) {
   const [ax, ay] = reachAnchor(so.x + sw / 2, so.y + sh / 2, sw, sh, to.x + tw / 2, to.y + th / 2, lane);
   const [bx, by] = reachAnchor(to.x + tw / 2, to.y + th / 2, tw, th, so.x + sw / 2, so.y + sh / 2, lane);
 
-  const dx = bx - ax;
-  const dy = by - ay;
+  const midX = (ax + bx) / 2;
+  const midY = (ay + by) / 2;
+  const bend = data?.bend ?? { x: 0, y: 0 };
+  const cx = midX + bend.x;
+  const cy = midY + bend.y;
+
+  // Arrowhead follows the curve's tangent at the target end.
+  const dx = bx - cx;
+  const dy = by - cy;
   const len = Math.hypot(dx, dy) || 1;
   const ux = dx / len;
   const uy = dy / len;
@@ -123,9 +134,26 @@ function ReachEdge({ source, target, data }: EdgeProps<Edge<ReachEdgeData>>) {
 
   const color = data?.color ?? "#64748b";
   const dimmed = data?.dimmed ?? false;
-  const path = `M${ax},${ay} L${bx},${by}`;
-  const labelX = (ax + bx) / 2;
-  const labelY = (ay + by) / 2;
+  const path = `M${ax},${ay} Q${cx},${cy} ${bx},${by}`;
+
+  const onHandlePointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const onMove = (ev: PointerEvent) => {
+      const flow = screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+      setEdges((eds) =>
+        eds.map((ed) =>
+          ed.id === id ? { ...ed, data: { ...(ed.data as ReachEdgeData), bend: { x: flow.x - midX, y: flow.y - midY } } } : ed,
+        ),
+      );
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   return (
     <>
@@ -139,11 +167,21 @@ function ReachEdge({ source, target, data }: EdgeProps<Edge<ReachEdgeData>>) {
         opacity={dimmed ? 0.12 : 1}
       />
       <EdgeLabelRenderer>
+        <div
+          className="reach-edge-handle nodrag nopan"
+          style={{
+            transform: `translate(-50%, -50%) translate(${cx}px, ${cy}px)`,
+            borderColor: color,
+            opacity: dimmed ? 0.2 : 0.7,
+          }}
+          onPointerDown={onHandlePointerDown}
+          title="Drag to bend the edge"
+        />
         {data?.label && (
           <div
             className="reach-edge-label"
             style={{
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              transform: `translate(-50%, -50%) translate(${cx}px, ${cy - 18}px)`,
               borderColor: color,
               opacity: dimmed ? 0 : 1,
             }}
