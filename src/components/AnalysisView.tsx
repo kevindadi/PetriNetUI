@@ -405,6 +405,61 @@ export function AnalysisView({ t, netKind, nodes, edges, onBack }: AnalysisViewP
                 )}
               </ul>
             </section>
+            {result.advanced.boundness && (
+              <section>
+                <h3>{t("analyzeBoundness")}</h3>
+                <ul className="analysis-stats">
+                  <li>
+                    {result.advanced.boundness.bounded
+                      ? t("analyzeBounded")
+                      : t("analyzeUnbounded")}
+                  </li>
+                  {!result.advanced.boundness.bounded &&
+                    result.advanced.boundness.unboundedPlaces.length > 0 && (
+                      <li className="analysis-warn">
+                        {t("analyzeUnboundedPlaces", {
+                          places: result.advanced.boundness.unboundedPlaces.join(", "),
+                        })}
+                      </li>
+                    )}
+                  {result.advanced.boundness.note && (
+                    <li className="analysis-warn">{result.advanced.boundness.note}</li>
+                  )}
+                </ul>
+              </section>
+            )}
+            {result.advanced.deadTransitions && (
+              <section>
+                <h3>{t("analyzeDeadTransitions")}</h3>
+                <ul className="analysis-transitions">
+                  {result.advanced.deadTransitions.length === 0 ? (
+                    <li className="hint">—</li>
+                  ) : (
+                    result.advanced.deadTransitions.map((id) => (
+                      <li key={id} className="analysis-dead-trans">
+                        {transitionLabels[id] ?? id}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </section>
+            )}
+            {result.advanced.timed && (
+              <section>
+                <h3>{t("analyzeTimed")}</h3>
+                <ul className="analysis-stats">
+                  <li>{t("analyzeStateClasses", { count: result.advanced.timed.stateClassCount })}</li>
+                  <li>
+                    {t("analyzeReachableMarkings", {
+                      count: result.advanced.timed.reachableMarkingCount,
+                    })}
+                  </li>
+                  {result.advanced.timed.truncated && (
+                    <li className="analysis-warn">{t("simUnbounded")}</li>
+                  )}
+                </ul>
+              </section>
+            )}
             <section>
               <h3>{t("simMaxTokens")}</h3>
               <div className="sim-marking">

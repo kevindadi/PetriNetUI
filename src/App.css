@@ -1248,6 +1248,11 @@ body,
   color: #6b7280;
 }
 
+.analysis-dead-trans {
+  font-size: 0.85em;
+  color: #b91c1c;
+}
+
 .analysis-canvas {
   flex: 1;
   min-width: 0;

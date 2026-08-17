@@ -6,7 +6,9 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use unipn::analysis::{explore, AnalysisConfig, NetLike, ReachabilityGraph, SearchStrategy};
-use unipn::cvn::{CvnArcKind, CvnExtra, CvnNet, CvnState, CvnTransition};
+use unipn::analysis::pt::check_boundness;
+use unipn::analysis::timed::reachability::{StateClassReachabilityGraph, reachable_markings};
+use unipn::cvn::{find_dead_transitions, CvnArcKind, CvnExtra, CvnNet, CvnState, CvnTransition};
 use unipn::expr::{BoolExpr, CmpOp, Expr, Op, Val, VarUpdate};
 use unipn::ids::{PlaceId, TransitionId};
 use unipn::model::{ControlSub, PlaceKind, ResourceType, TransitionKind};
@@ -122,6 +124,31 @@ pub struct AnalysisResultDto {
     pub max_tokens: BTreeMap<String, usize>,
     pub states: Vec<ReachStateDto>,
     pub edges: Vec<ReachEdgeDto>,
+    pub advanced: AdvancedDto,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvancedDto {
+    pub boundness: Option<BoundnessDto>,
+    pub dead_transitions: Option<Vec<String>>,
+    pub timed: Option<TimedSummaryDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundnessDto {
+    pub bounded: bool,
+    pub unbounded_places: Vec<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimedSummaryDto {
+    pub state_class_count: usize,
+    pub reachable_marking_count: usize,
+    pub truncated: bool,
 }
 
 #[derive(Serialize)]
@@ -515,8 +542,8 @@ pub(crate) fn build_cvn(sem: &SemanticNetDto) -> Result<(CvnNet, CvnState, Vec<S
 /// P/T with reject-capacity: a transition is not enabled if a non-saturating
 /// output place would overflow (UniPN's `PtNet` always saturates).
 pub(crate) struct PtAnalyzer {
-    net: PtNet,
-    reject: HashSet<usize>,
+    pub(crate) net: PtNet,
+    pub(crate) reject: HashSet<usize>,
 }
 
 impl PtAnalyzer {
@@ -639,6 +666,7 @@ fn convert_result<S>(
     place_order: &[String],
     trans_order: &[String],
     marking_of: impl Fn(&S) -> &Marking,
+    advanced: AdvancedDto,
 ) -> AnalysisResultDto {
     let levels = compute_levels(&graph.edges, graph.states.len());
     let mut max_tokens: BTreeMap<String, usize> = BTreeMap::new();
@@ -693,6 +721,7 @@ fn convert_result<S>(
         max_tokens,
         states,
         edges,
+        advanced,
     }
 }
 
@@ -717,20 +746,96 @@ fn run_analysis(semantic: &SemanticNetDto, max_states: u64) -> Result<AnalysisRe
     match semantic.net_kind.as_str() {
         "pt" => {
             let (net, marking, po, to, reject) = build_pt(semantic)?;
+            let advanced = pt_advanced(&net, &marking, &po);
             let graph = explore(&PtAnalyzer { net, reject }, marking, &config);
-            Ok(convert_result(&graph, &po, &to, |s: &Marking| s))
+            Ok(convert_result(&graph, &po, &to, |s: &Marking| s, advanced))
         }
         "timed" => {
             let (net, state, po, to) = build_timed(semantic)?;
+            let advanced = timed_advanced(&net, &state.marking, max_states.max(1) as usize);
             let graph = explore(&TimedAnalyzer { net }, state, &config);
-            Ok(convert_result(&graph, &po, &to, |s: &TimedState| &s.marking))
+            Ok(convert_result(
+                &graph,
+                &po,
+                &to,
+                |s: &TimedState| &s.marking,
+                advanced,
+            ))
         }
         "cvn" => {
             let (net, state, po, to) = build_cvn(semantic)?;
+            let advanced = cvn_advanced(&net, &po, &to, &state);
             let graph = explore(&net, state, &config);
-            Ok(convert_result(&graph, &po, &to, |s: &CvnState| &s.marking))
+            Ok(convert_result(&graph, &po, &to, |s: &CvnState| &s.marking, advanced))
         }
         other => Err(format!("unsupported net kind: {other}")),
+    }
+}
+
+fn pt_advanced(net: &PtNet, initial: &Marking, place_order: &[String]) -> AdvancedDto {
+    let boundness = match check_boundness(net, initial) {
+        unipn::analysis::pt::BoundnessResult::Bounded => BoundnessDto {
+            bounded: true,
+            unbounded_places: Vec::new(),
+            note: None,
+        },
+        unipn::analysis::pt::BoundnessResult::Unbounded { unbounded_places, .. } => BoundnessDto {
+            bounded: false,
+            unbounded_places: unbounded_places
+                .iter()
+                .filter_map(|p| place_order.get(p.index()).cloned())
+                .collect(),
+            note: None,
+        },
+        unipn::analysis::pt::BoundnessResult::Unknown { reason } => BoundnessDto {
+            bounded: false,
+            unbounded_places: Vec::new(),
+            note: Some(reason),
+        },
+    };
+    AdvancedDto {
+        boundness: Some(boundness),
+        dead_transitions: None,
+        timed: None,
+    }
+}
+
+fn timed_advanced(net: &TimedNet, initial: &Marking, max_states: usize) -> AdvancedDto {
+    let mut builder = StateClassReachabilityGraph::new(net, initial.clone());
+    let _ = builder.build(max_states);
+    let graph = builder.get_graph();
+    let timed = TimedSummaryDto {
+        state_class_count: graph.states.len(),
+        reachable_marking_count: reachable_markings(graph).len(),
+        truncated: graph.stats.truncated,
+    };
+    AdvancedDto {
+        boundness: None,
+        dead_transitions: None,
+        timed: Some(timed),
+    }
+}
+
+fn cvn_advanced(net: &CvnNet, po: &[String], to: &[String], initial: &CvnState) -> AdvancedDto {
+    let config = AnalysisConfig {
+        strategy: SearchStrategy::Bfs,
+        max_states: 100_000,
+    };
+    let graph = explore(net, initial.clone(), &config);
+    let dead = find_dead_transitions(net, &graph)
+        .into_iter()
+        .filter_map(|c| match c.kind {
+            unipn::analysis::PropertyViolation::DeadTransition { transition, .. } => {
+                to.get(transition.index()).cloned()
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let _ = po;
+    AdvancedDto {
+        boundness: None,
+        dead_transitions: Some(dead),
+        timed: None,
     }
 }
 
@@ -828,6 +933,8 @@ mod tests {
         assert_eq!(r.deadlock_count, 0, "deadlocks");
         assert!(!r.truncated);
         assert_eq!(r.max_tokens.get("A_crit"), Some(&1));
+        let b = r.advanced.boundness.expect("pt boundness");
+        assert!(b.bounded, "mutex net should be bounded");
     }
 
     #[test]
@@ -879,6 +986,9 @@ mod tests {
         assert_eq!(r.state_count, 2, "states");
         assert_eq!(r.edges.len(), 2, "edges");
         assert_eq!(r.deadlock_count, 0);
+        let t = r.advanced.timed.expect("timed dbm");
+        assert!(t.state_class_count >= 1);
+        assert_eq!(t.reachable_marking_count, 2);
     }
 
     #[test]
@@ -954,5 +1064,7 @@ mod tests {
         assert_eq!(r.deadlock_count, 1, "deadlocks (counter reaches n=2)");
         let deadlock_idx = r.states.iter().position(|s| s.deadlock).expect("a deadlock state");
         assert_eq!(r.states[deadlock_idx].marking.get("Mutex"), Some(&1));
+        let dead = r.advanced.dead_transitions.expect("cvn dead transitions");
+        assert!(dead.is_empty(), "all four transitions fire, got {dead:?}");
     }
 }

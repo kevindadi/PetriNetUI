@@ -70,15 +70,10 @@ import {
 } from "./model";
 import { parseXml, serializeXml } from "./xml";
 import {
-  initialSimState,
-  enabledTransitions,
-  waitingTransitions,
-  fireTransition,
-  advanceTime,
-  analyze,
   summarizeAnalysis,
   pickTransition,
   type SimState,
+  type AnalysisResult,
 } from "./simulation";
 
 const nodeTypes = { place: PlaceNode, transition: TransitionNode };
@@ -127,9 +122,13 @@ function App() {
     return saved === "zh" || saved === "en" ? saved : "en";
   });
   const t = useMemo(() => makeTranslator(lang), [lang]);
-  const [simState, setSimState] = useState<SimState>(() =>
-    initialSimState(initialNet.nodes, initialNet.edges, "pt"),
-  );
+  const [simState, setSimState] = useState<SimState | null>(null);
+  const [enabled, setEnabled] = useState<string[]>([]);
+  const [waiting, setWaiting] = useState<string[]>([]);
+  const [canAdvance, setCanAdvance] = useState(false);
+  const [idleEnabled, setIdleEnabled] = useState<string[]>([]);
+  const [idleWaiting, setIdleWaiting] = useState<string[]>([]);
+  const simBusyRef = useRef(false);
   const [simulating, setSimulating] = useState(false);
   const [autoPlay, setAutoPlay] = useState(false);
   const [stepCount, setStepCount] = useState(0);
@@ -279,37 +278,64 @@ function App() {
     [makeArc, setEdges, scheduleCommit],
   );
 
-  const enabled = useMemo(
-    () => (simulating ? enabledTransitions(nodes, edges, simState, netKind) : []),
-    [simulating, nodes, edges, simState, netKind],
-  );
-  const waiting = useMemo(
-    () => (simulating ? waitingTransitions(nodes, edges, simState, netKind) : []),
-    [simulating, nodes, edges, simState, netKind],
-  );
+  type SimResult = {
+    state: SimState;
+    enabled: string[];
+    waiting: string[];
+    canAdvance: boolean;
+  };
 
-  const idleState = useMemo(() => initialSimState(nodes, edges, netKind), [nodes, edges, netKind]);
-  const idleEnabled = useMemo(
-    () => enabledTransitions(nodes, edges, idleState, netKind),
-    [nodes, edges, idleState, netKind],
-  );
-  const idleWaiting = useMemo(
-    () => waitingTransitions(nodes, edges, idleState, netKind),
-    [nodes, edges, idleState, netKind],
-  );
+  const applySimResult = useCallback((r: SimResult) => {
+    setSimState(r.state);
+    setEnabled(r.enabled);
+    setWaiting(r.waiting);
+    setCanAdvance(r.canAdvance);
+  }, []);
+
+  const refreshIdle = useCallback(async () => {
+    try {
+      const r = await invoke<SimResult>("sim_initial", {
+        semantic: flowToSemantic(nodes, edges, netKind),
+      });
+      setIdleEnabled(r.enabled);
+      setIdleWaiting(r.waiting);
+    } catch {
+      /* keep previous highlight */
+    }
+  }, [nodes, edges, netKind]);
+
+  useEffect(() => {
+    if (simulating) return;
+    const timer = setTimeout(() => {
+      void refreshIdle();
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [refreshIdle, simulating]);
 
   const fireTransitionById = useCallback(
-    (id: string) => {
-      setSimState((s) => fireTransition(nodes, edges, s, id, netKind));
-      setStepCount((c) => c + 1);
+    async (id: string) => {
+      if (!simState) return;
+      try {
+        const r = await invoke<SimResult | null>("sim_fire", {
+          semantic: flowToSemantic(nodes, edges, netKind),
+          state: simState,
+          transitionId: id,
+        });
+        if (r) {
+          applySimResult(r);
+          setStepCount((c) => c + 1);
+        }
+      } catch {
+        /* ignore */
+      }
     },
-    [nodes, edges, netKind],
+    [simState, nodes, edges, netKind, applySimResult],
   );
 
   const onNodeClick = useCallback(
     (_event: MouseEvent, node: PetriNode) => {
       if (simulating && node.type === "transition" && enabled.includes(node.id)) {
-        fireTransitionById(node.id);
+        void fireTransitionById(node.id);
         return;
       }
       if (!arcMode) return;
@@ -337,43 +363,67 @@ function App() {
     [simulating, enabled, fireTransitionById, arcMode, pendingSource, nodes, edges, makeArc, setEdges, scheduleCommit],
   );
 
-  const startSimulation = useCallback(() => {
-    setSimState(initialSimState(nodes, edges, netKind));
+  const startSimulation = useCallback(async () => {
+    setSimulating(true);
     setStepCount(0);
     setAutoPlay(false);
     setSimCollapsed(false);
     setSimOpen(true);
-    setSimulating(true);
-  }, [nodes, edges, netKind]);
+    try {
+      const r = await invoke<SimResult>("sim_initial", {
+        semantic: flowToSemantic(nodes, edges, netKind),
+      });
+      applySimResult(r);
+    } catch {
+      setSimulating(false);
+    }
+  }, [nodes, edges, netKind, applySimResult]);
 
-  const resetSimulation = useCallback(() => {
-    setSimState(initialSimState(nodes, edges, netKind));
+  const resetSimulation = useCallback(async () => {
     setStepCount(0);
-  }, [nodes, edges, netKind]);
+    try {
+      const r = await invoke<SimResult>("sim_initial", {
+        semantic: flowToSemantic(nodes, edges, netKind),
+      });
+      applySimResult(r);
+    } catch {
+      /* ignore */
+    }
+  }, [nodes, edges, netKind, applySimResult]);
 
   const stopSimulation = useCallback(() => {
     setSimulating(false);
     setAutoPlay(false);
   }, []);
 
-  const advanceSimTime = useCallback(() => {
-    setSimState((s) => advanceTime(nodes, edges, s, netKind) ?? s);
-  }, [nodes, edges, netKind]);
-
-  const fireStep = useCallback(() => {
-    const list = enabledTransitions(nodes, edges, simState, netKind);
-    const id = pickTransition(list, nodes);
-    if (id) {
-      fireTransitionById(id);
-      return;
+  const advanceSimTime = useCallback(async () => {
+    if (!simState) return;
+    try {
+      const r = await invoke<SimResult | null>("sim_advance_time", {
+        semantic: flowToSemantic(nodes, edges, netKind),
+        state: simState,
+      });
+      if (r) applySimResult(r);
+    } catch {
+      /* ignore */
     }
-    const next = advanceTime(nodes, edges, simState, netKind);
-    if (next) {
-      setSimState(next);
+  }, [simState, nodes, edges, netKind, applySimResult]);
+
+  const fireStep = useCallback(async () => {
+    if (!simState) return;
+    if (enabled.length > 0) {
+      const id = pickTransition(enabled, nodes);
+      if (id) {
+        await fireTransitionById(id);
+        return;
+      }
+    }
+    if (canAdvance) {
+      await advanceSimTime();
       return;
     }
     setAutoPlay(false);
-  }, [nodes, edges, simState, netKind, fireTransitionById]);
+  }, [simState, enabled, canAdvance, nodes, fireTransitionById, advanceSimTime]);
 
   const runAnalysis = useCallback(() => {
     setShowAnalysis(true);
@@ -381,7 +431,13 @@ function App() {
 
   useEffect(() => {
     if (!autoPlay || !simulating) return;
-    const id = setInterval(fireStep, 600);
+    const id = setInterval(() => {
+      if (simBusyRef.current) return;
+      simBusyRef.current = true;
+      void fireStep().finally(() => {
+        simBusyRef.current = false;
+      });
+    }, 600);
     return () => clearInterval(id);
   }, [autoPlay, simulating, fireStep]);
 
@@ -393,7 +449,7 @@ function App() {
       }
       let data = n.data;
       if (n.type === "place" && simulating) {
-        data = { ...data, tokens: simState.marking[n.id] ?? 0 } as PlaceData;
+        data = { ...data, tokens: simState?.marking[n.id] ?? 0 } as PlaceData;
       }
       const activeEnabled = simulating ? enabled : idleEnabled;
       const activeWaiting = simulating ? waiting : idleWaiting;
@@ -614,12 +670,20 @@ function App() {
     setChatMessages((m) => [...m, { role: "user", content: prompt }]);
     setChatLoading(true);
     try {
+      let analysisSummary = "";
+      try {
+        const ar = await invoke<AnalysisResult>("analyze_net", {
+          semantic: flowToSemantic(nodes, edges, netKind),
+          maxStates: 2000,
+        });
+        analysisSummary = summarizeAnalysis(ar);
+      } catch {
+        analysisSummary = "analysis unavailable";
+      }
       const raw = await invoke<string>("generate_petri_net", {
         prompt,
         netSummary: netToSummary(nodes, edges, netKind),
-        analysisSummary: summarizeAnalysis(
-          analyze(nodes, edges, initialSimState(nodes, edges, netKind), netKind),
-        ),
+        analysisSummary,
         history: chatMessages.slice(-10),
         netKind,
       });
@@ -838,18 +902,18 @@ function App() {
         </aside>
       </div>
 
-      {simOpen && (
+      {simOpen && simState && (
         <SimulationPanel
           t={t}
           netKind={netKind}
           nodes={nodes}
-          edges={edges}
           simulating={simulating}
           autoPlay={autoPlay}
           stepCount={stepCount}
           simState={simState}
           enabled={enabled}
           waiting={waiting}
+          canAdvance={canAdvance}
           collapsed={simCollapsed}
           onToggleCollapsed={() => setSimCollapsed((c) => !c)}
           onStart={startSimulation}

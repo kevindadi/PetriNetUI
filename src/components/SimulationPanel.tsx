@@ -1,19 +1,19 @@
 import type { Translator } from "../i18n";
-import { canAdvanceTime, type SimState } from "../simulation";
-import type { NetKind, PetriEdge, PetriNode, PlaceData, TransitionData } from "../types";
+import type { SimState } from "../simulation";
+import type { NetKind, PetriNode, PlaceData, TransitionData } from "../types";
 import { formatTimeInterval } from "../types";
 
 type SimulationPanelProps = {
   t: Translator;
   netKind: NetKind;
   nodes: PetriNode[];
-  edges: PetriEdge[];
   simulating: boolean;
   autoPlay: boolean;
   stepCount: number;
   simState: SimState;
   enabled: string[];
   waiting: string[];
+  canAdvance: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onStart: () => void;
@@ -35,13 +35,13 @@ export function SimulationPanel({
   t,
   netKind,
   nodes,
-  edges,
   simulating,
   autoPlay,
   stepCount,
   simState,
   enabled,
   waiting,
+  canAdvance,
   collapsed,
   onToggleCollapsed,
   onStart,
@@ -53,8 +53,6 @@ export function SimulationPanel({
   onFire,
   onAnalyze,
 }: SimulationPanelProps) {
-  const canAdvance = canAdvanceTime(nodes, edges, simState, netKind);
-
   return (
     <div className="sim-panel">
       <div className="sim-header">

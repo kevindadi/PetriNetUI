@@ -1,5 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod analyze;
+mod sim;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -130,7 +131,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             generate_petri_net,
-            analyze::analyze_net
+            analyze::analyze_net,
+            sim::sim_initial,
+            sim::sim_fire,
+            sim::sim_advance_time
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
