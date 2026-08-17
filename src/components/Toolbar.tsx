@@ -24,6 +24,7 @@ type ToolbarProps = {
   onChooseNetKind: () => void;
   onToggleChat: () => void;
   onToggleSim: () => void;
+  onAutoLayout: () => void;
   onLang: (lang: Language) => void;
 };
 
@@ -50,6 +51,7 @@ export function Toolbar({
   onChooseNetKind,
   onToggleChat,
   onToggleSim,
+  onAutoLayout,
   onLang,
 }: ToolbarProps) {
   const kindLabel =
@@ -112,6 +114,9 @@ export function Toolbar({
         </button>
         <button className={simOpen ? "active" : ""} onClick={onToggleSim} title={t("menuShowSim")}>
           {t("simToggle")}
+        </button>
+        <button onClick={onAutoLayout} title={t("autoLayoutTitle")}>
+          {t("autoLayout")}
         </button>
       </span>
       <span className="tb-sep" />

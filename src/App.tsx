@@ -61,6 +61,14 @@ import {
 } from "./types";
 import { makeTranslator, type Language } from "./i18n";
 import { NET_EXAMPLES } from "./examples";
+import { computeLayout } from "./layout";
+import {
+  bumpIdCounterForIds,
+  flowToSemantic,
+  positionsFromFlow,
+  semanticToFlow,
+} from "./model";
+import { parseXml, serializeXml } from "./xml";
 import {
   initialSimState,
   enabledTransitions,
@@ -502,29 +510,89 @@ function App() {
 
   const handleSave = useCallback(async () => {
     const path = await save({
-      filters: [{ name: "Petri Net", extensions: ["json"] }],
-      defaultPath: "untitled.pn.json",
+      filters: [{ name: "Petri Net (XML)", extensions: ["xml"] }],
+      defaultPath: "untitled.pn.xml",
     });
     if (!path) return;
-    await writeTextFile(path, JSON.stringify({ netKind, nodes, edges } satisfies PetriNet, null, 2));
+    const xml = serializeXml(flowToSemantic(nodes, edges, netKind), positionsFromFlow(nodes));
+    await writeTextFile(path, xml);
+  }, [nodes, edges, netKind]);
+
+  const handleExportSemantic = useCallback(async () => {
+    const path = await save({
+      filters: [{ name: "Semantic JSON", extensions: ["json"] }],
+      defaultPath: "net.semantic.json",
+    });
+    if (!path) return;
+    await writeTextFile(
+      path,
+      JSON.stringify(flowToSemantic(nodes, edges, netKind), null, 2),
+    );
   }, [nodes, edges, netKind]);
 
   const handleOpen = useCallback(async () => {
     const path = await open({
-      filters: [{ name: "Petri Net", extensions: ["json"] }],
+      filters: [
+        { name: "Petri Net", extensions: ["xml", "json"] },
+      ],
       multiple: false,
     });
     if (!path) return;
-    const net = JSON.parse(await readTextFile(path as string)) as PetriNet;
+    const text = await readTextFile(path as string);
     scheduleCommit();
-    setNetKind(net.netKind ?? "pt");
-    setNodes(net.nodes ?? []);
-    setEdges(net.edges ?? []);
+    if (text.trimStart().startsWith("<")) {
+      const { sem, positions } = parseXml(text);
+      bumpIdCounterForIds([
+        ...sem.places.map((p) => p.id),
+        ...sem.transitions.map((t) => t.id),
+        ...sem.arcs.map((a) => a.id),
+      ]);
+      const net = semanticToFlow(sem, positions);
+      setNetKind(sem.netKind);
+      setNodes(net.nodes);
+      setEdges(net.edges);
+    } else {
+      const net = JSON.parse(text) as PetriNet;
+      bumpIdCounterForIds([...net.nodes.map((n) => n.id), ...net.edges.map((e) => e.id)]);
+      setNetKind(net.netKind ?? "pt");
+      setNodes(net.nodes ?? []);
+      setEdges(net.edges ?? []);
+    }
+    setSelection(null);
   }, [setNodes, setEdges, scheduleCommit]);
+
+  const applyLayout = useCallback(
+    (net: PetriNet): PetriNet => {
+      const positions = computeLayout(
+        net.nodes.map((n) => ({ id: n.id, width: 84, height: 64 })),
+        net.edges,
+        { rankdir: "LR", nodesep: 70, ranksep: 110 },
+      );
+      return {
+        ...net,
+        nodes: net.nodes.map((n) => ({
+          ...n,
+          position: positions[n.id] ?? n.position,
+        })),
+      };
+    },
+    [],
+  );
+
+  const autoLayout = useCallback(() => {
+    scheduleCommit();
+    const positions = computeLayout(
+      nodes.map((n) => ({ id: n.id, width: 84, height: 64 })),
+      edges,
+      { rankdir: "LR", nodesep: 70, ranksep: 110 },
+    );
+    setNodes((nds) => nds.map((n) => ({ ...n, position: positions[n.id] ?? n.position })));
+    setTimeout(() => rfInstance.current?.fitView({ padding: 0.2 }), 60);
+  }, [nodes, edges, scheduleCommit, setNodes]);
 
   const loadExample = useCallback(
     (build: () => PetriNet) => {
-      const net = build();
+      const net = applyLayout(build());
       scheduleCommit();
       setNetKind(net.netKind);
       setNodes(net.nodes);
@@ -536,7 +604,7 @@ function App() {
       setShowAnalysis(false);
       setTimeout(() => rfInstance.current?.fitView({ padding: 0.2 }), 80);
     },
-    [scheduleCommit, setNetKind, setNodes, setEdges],
+    [applyLayout, scheduleCommit, setNetKind, setNodes, setEdges],
   );
 
   const sendChat = useCallback(async () => {
@@ -557,7 +625,7 @@ function App() {
       });
       const aiNet = extractNet(raw);
       if (aiNet) {
-        const net = aiNetToPetriNet(aiNet, netKind);
+        const net = applyLayout(aiNetToPetriNet(aiNet, netKind));
         scheduleCommit();
         setNodes(net.nodes);
         setEdges(net.edges);
@@ -597,6 +665,7 @@ function App() {
       items: [
         { type: "action", label: t("menuOpen"), onClick: handleOpen },
         { type: "action", label: t("menuSave"), onClick: handleSave },
+        { type: "action", label: t("menuExportSemantic"), onClick: handleExportSemantic },
         { type: "separator" },
         { type: "action", label: t("menuClear"), onClick: clearAll },
       ],
@@ -666,6 +735,7 @@ function App() {
         onChooseNetKind={() => setShowNetKind(true)}
         onToggleChat={() => setChatOpen((o) => !o)}
         onToggleSim={() => setSimOpen((o) => !o)}
+        onAutoLayout={autoLayout}
         onLang={(next) => {
           setLang(next);
           localStorage.setItem("pn-lang", next);

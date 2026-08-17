@@ -179,6 +179,10 @@ export function nextId(prefix: string): string {
   return `${prefix}_${idCounter}`;
 }
 
+export function bumpIdCounter(min: number): void {
+  if (min > idCounter) idCounter = min;
+}
+
 export function createPlace(x: number, y: number, nk: NetKind = "pt"): Node<PlaceData, "place"> {
   const node: Node<PlaceData, "place"> = {
     id: nextId("p"),
