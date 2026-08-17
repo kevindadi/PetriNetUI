@@ -1323,6 +1323,8 @@ body,
   background: #fff;
   border: 2px solid #cbd5e1;
   cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
   z-index: 5;
 }
 
