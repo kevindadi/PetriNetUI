@@ -151,7 +151,7 @@ fn arc_direction(arc_type: &str, source_is_place: bool) -> ArcDir {
     }
 }
 
-fn build_pt(sem: &SemanticNetDto) -> Result<(PtNet, Marking, Vec<String>, Vec<String>, HashSet<usize>), String> {
+pub(crate) fn build_pt(sem: &SemanticNetDto) -> Result<(PtNet, Marking, Vec<String>, Vec<String>, HashSet<usize>), String> {
     let mut net: PtNet = Net::new();
     let mut marking = Vec::with_capacity(sem.places.len());
     let mut place_index: HashMap<&str, PlaceId> = HashMap::new();
@@ -206,7 +206,7 @@ fn build_pt(sem: &SemanticNetDto) -> Result<(PtNet, Marking, Vec<String>, Vec<St
     Ok((net, Marking::new(marking), place_order, trans_order, reject))
 }
 
-fn build_timed(sem: &SemanticNetDto) -> Result<(TimedNet, TimedState, Vec<String>, Vec<String>), String> {
+pub(crate) fn build_timed(sem: &SemanticNetDto) -> Result<(TimedNet, TimedState, Vec<String>, Vec<String>), String> {
     let mut net: TimedNet = Net::new();
     let mut marking = Vec::with_capacity(sem.places.len());
     let mut place_index: HashMap<&str, PlaceId> = HashMap::new();
@@ -407,7 +407,7 @@ fn collect_identifiers(s: &str, out: &mut Vec<String>) {
     }
 }
 
-fn build_cvn(sem: &SemanticNetDto) -> Result<(CvnNet, CvnState, Vec<String>, Vec<String>), String> {
+pub(crate) fn build_cvn(sem: &SemanticNetDto) -> Result<(CvnNet, CvnState, Vec<String>, Vec<String>), String> {
     let mut net: CvnNet = Net::new();
     let mut marking = Vec::with_capacity(sem.places.len());
     let mut place_index: HashMap<&str, PlaceId> = HashMap::new();
@@ -514,7 +514,7 @@ fn build_cvn(sem: &SemanticNetDto) -> Result<(CvnNet, CvnState, Vec<String>, Vec
 
 /// P/T with reject-capacity: a transition is not enabled if a non-saturating
 /// output place would overflow (UniPN's `PtNet` always saturates).
-struct PtAnalyzer {
+pub(crate) struct PtAnalyzer {
     net: PtNet,
     reject: HashSet<usize>,
 }
@@ -564,7 +564,7 @@ impl NetLike for PtAnalyzer {
 
 /// Timed with inhibitor/reset arcs (UniPN's `TimedNet` NetLike handles only
 /// input/output arcs).
-struct TimedAnalyzer {
+pub(crate) struct TimedAnalyzer {
     net: TimedNet,
 }
 
