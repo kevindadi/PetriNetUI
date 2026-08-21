@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   BaseEdge,
   EdgeLabelRenderer,
+  Position,
   getBezierPath,
   useReactFlow,
   useStore,
@@ -9,22 +10,37 @@ import {
 } from "@xyflow/react";
 import { patchArcData, type PetriEdge, type PetriNode } from "../types";
 
-export function ArcEdge(props: EdgeProps<PetriEdge>) {
-  const {
-    id,
-    source,
-    target,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    markerEnd,
-    data,
-    selected,
-  } = props;
+/**
+ * Pick the point on a node's boundary that faces the other node (the nearest
+ * connection point), together with that face so the curve leaves perpendicular
+ * to it.
+ */
+function facingAnchor(
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+  ex: number,
+  ey: number,
+): { x: number; y: number; position: Position } {
+  const dx = ex - cx;
+  const dy = ey - cy;
+  if (dx === 0 && dy === 0) return { x: cx + w / 2, y: cy, position: Position.Right };
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const dir = dx >= 0 ? 1 : -1;
+    const x = cx + dir * (w / 2);
+    const y = cy + (dy / Math.abs(dx)) * (w / 2);
+    return { x, y, position: dir > 0 ? Position.Right : Position.Left };
+  }
+  const dir = dy >= 0 ? 1 : -1;
+  const y = cy + dir * (h / 2);
+  const x = cx + (dx / Math.abs(dy)) * (h / 2);
+  return { x, y, position: dir > 0 ? Position.Bottom : Position.Top };
+}
 
+export function ArcEdge({ id, source, target, markerEnd, data, selected }: EdgeProps<PetriEdge>) {
+  const sourceNode = useStore((s) => s.nodeLookup.get(source) ?? null);
+  const targetNode = useStore((s) => s.nodeLookup.get(target) ?? null);
   const edges = useStore((s) => s.edges);
   const { setEdges } = useReactFlow<PetriNode, PetriEdge>();
 
@@ -39,15 +55,44 @@ export function ArcEdge(props: EdgeProps<PetriEdge>) {
   );
   const curvature = hasReverse ? (source < target ? 0.25 : -0.25) : 0.25;
 
-  const [path, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-    curvature,
-  });
+  let path = "";
+  let labelX = 0;
+  let labelY = 0;
+  if (sourceNode && targetNode) {
+    const so = sourceNode.internals.positionAbsolute;
+    const to = targetNode.internals.positionAbsolute;
+    const sw = sourceNode.measured?.width ?? sourceNode.width ?? 44;
+    const sh = sourceNode.measured?.height ?? sourceNode.height ?? 44;
+    const tw = targetNode.measured?.width ?? targetNode.width ?? 44;
+    const th = targetNode.measured?.height ?? targetNode.height ?? 44;
+
+    const sa = facingAnchor(
+      so.x + sw / 2,
+      so.y + sh / 2,
+      sw,
+      sh,
+      to.x + tw / 2,
+      to.y + th / 2,
+    );
+    const ta = facingAnchor(
+      to.x + tw / 2,
+      to.y + th / 2,
+      tw,
+      th,
+      so.x + sw / 2,
+      so.y + sh / 2,
+    );
+
+    [path, labelX, labelY] = getBezierPath({
+      sourceX: sa.x,
+      sourceY: sa.y,
+      sourcePosition: sa.position,
+      targetX: ta.x,
+      targetY: ta.y,
+      targetPosition: ta.position,
+      curvature,
+    });
+  }
 
   const markerId = `inhibitor-marker-${id}`;
   const finalMarkerEnd = arcType === "inhibitor" ? `url(#${markerId})` : markerEnd;
